@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart2, BookOpen, Briefcase, Home, TrendingUp, Settings } from "lucide-react";
+import { BarChart2, BookOpen, Briefcase, Home, TrendingUp, Settings, FlaskConical, Gauge } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const nav = [
   { href: "/", icon: Home, label: "대시보드" },
   { href: "/market", icon: TrendingUp, label: "시장" },
+  { href: "/signals", icon: Gauge, label: "시그널" },
+  { href: "/strategy", icon: FlaskConical, label: "전략 연구소" },
   { href: "/watchlist", icon: BookOpen, label: "관심종목" },
   { href: "/portfolio", icon: Briefcase, label: "포트폴리오" },
   { href: "/analytics", icon: BarChart2, label: "분석" },
