@@ -6,7 +6,7 @@ import PriceCard from "@/components/PriceCard";
 import { useAppStore } from "@/store/useAppStore";
 import { extractArray } from "@/lib/parse";
 import { formatNumber } from "@/lib/utils";
-import { TrendingUp, TrendingDown, Activity, Wallet, Briefcase, ArrowUp, ArrowDown } from "lucide-react";
+import { TrendingUp, TrendingDown, Activity, Wallet, Briefcase, ArrowUp, ArrowDown, Atom, ArrowRight } from "lucide-react";
 import Link from "next/link";
 
 interface PriceData {
@@ -66,11 +66,10 @@ export default function DashboardPage() {
       .finally(() => setLoadingPrices(false));
   }, [watchlist]);
 
-  // 실시간 가격 업데이트: 5초마다 fast 모드로 currentPrice만 갱신
+  // 실시간 가격 업데이트 (백그라운드, 15초)
   useEffect(() => {
     if (watchlist.length === 0) return;
     if (pollingRef.current) window.clearInterval(pollingRef.current);
-
     pollingRef.current = window.setInterval(() => {
       fetch(`/api/prices?symbols=${watchlist.join(",")}&fast=1`)
         .then((r) => (r.ok ? r.json() : null))
@@ -79,13 +78,10 @@ export default function DashboardPage() {
           const list = extractArray<{ symbol: string; currentPrice: number }>(d, "prices");
           if (list.length === 0) return;
           const map = Object.fromEntries(list.map((p) => [p.symbol, p.currentPrice]));
-          setPrices((prev) =>
-            prev.map((p) => (map[p.symbol] !== undefined ? { ...p, currentPrice: map[p.symbol] } : p))
-          );
+          setPrices((prev) => prev.map((p) => (map[p.symbol] !== undefined ? { ...p, currentPrice: map[p.symbol] } : p)));
         })
         .catch(() => {});
     }, 15000);
-
     return () => { if (pollingRef.current) window.clearInterval(pollingRef.current); };
   }, [watchlist]);
 
@@ -111,72 +107,81 @@ export default function DashboardPage() {
   const dailyPnl = (summary?.usdDailyPnlKRW ?? 0) + (summary?.krwDailyPnl ?? 0);
 
   return (
-    <div className="flex flex-col min-h-screen bg-slate-50">
+    <div className="min-h-screen">
       <Header title="대시보드" />
-      <div className="p-6 space-y-8 max-w-7xl mx-auto w-full">
+      <div className="p-6 space-y-7 max-w-7xl mx-auto w-full">
+
+        {/* 리서치 랩 배너 */}
+        <Link href="/lab" className="block panel p-4 relative overflow-hidden group hover:border-violet-400/40 transition-colors">
+          <div className="absolute -top-12 -right-8 w-52 h-52 rounded-full bg-violet-500/10 blur-3xl" />
+          <div className="flex items-center justify-between relative">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-blue-500 flex items-center justify-center glow">
+                <Atom className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-white">리서치 랩 — 매수·매도·수량 추천 + 백테스트</p>
+                <p className="text-xs text-[var(--text-dim)]">워크포워드 · 강화학습 · 과적합검증(PBO/DSR) · 포트폴리오</p>
+              </div>
+            </div>
+            <ArrowRight className="w-5 h-5 text-[var(--text-mute)] group-hover:text-violet-300 group-hover:translate-x-0.5 transition-all" />
+          </div>
+        </Link>
 
         {/* 요약 카드 */}
         <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-white border border-violet-100 rounded-xl p-4 shadow-sm">
+          <div className="panel p-4">
             <div className="flex items-center gap-2 mb-3">
-              <div className="p-2 rounded-lg bg-violet-50">
-                <Wallet className="w-4 h-4 text-violet-600" />
-              </div>
-              <span className="text-xs text-slate-500 font-medium">총 평가금액</span>
+              <div className="p-2 rounded-lg bg-violet-500/10"><Wallet className="w-4 h-4 text-violet-300" /></div>
+              <span className="text-xs text-[var(--text-dim)] font-medium">총 평가금액</span>
             </div>
-            <p className="text-xl font-bold tabular-nums text-violet-600">
+            <p className="text-xl font-bold tabular-nums text-violet-300">
               {totalKRW > 0 ? `${formatNumber(Math.round(totalKRW))}원` : loadingHoldings ? "로딩중…" : "—"}
             </p>
-            <p className="text-xs text-slate-400 mt-1">
+            <p className="text-xs text-[var(--text-mute)] mt-1">
               {summary ? `환율 ₩${formatNumber(summary.exchangeRate, 1)}` : selectedAccount?.accountName ?? "계좌 없음"}
             </p>
           </div>
 
-          <div className={`bg-white border rounded-xl p-4 shadow-sm ${totalPnl >= 0 ? "border-red-100" : "border-blue-100"}`}>
+          <div className={`panel p-4 ${totalPnl >= 0 ? "border-rose-500/20" : "border-blue-500/20"}`}>
             <div className="flex items-center gap-2 mb-3">
-              <div className={`p-2 rounded-lg ${totalPnl >= 0 ? "bg-red-50" : "bg-blue-50"}`}>
-                {totalPnl >= 0
-                  ? <TrendingUp className="w-4 h-4 text-red-500" />
-                  : <TrendingDown className="w-4 h-4 text-blue-500" />}
+              <div className={`p-2 rounded-lg ${totalPnl >= 0 ? "bg-rose-500/10" : "bg-blue-500/10"}`}>
+                {totalPnl >= 0 ? <TrendingUp className="w-4 h-4 text-rose-400" /> : <TrendingDown className="w-4 h-4 text-blue-400" />}
               </div>
-              <span className="text-xs text-slate-500 font-medium">누적 손익</span>
+              <span className="text-xs text-[var(--text-dim)] font-medium">누적 손익</span>
             </div>
-            <p className={`text-xl font-bold tabular-nums ${totalPnl >= 0 ? "text-red-500" : "text-blue-500"}`}>
+            <p className={`text-xl font-bold tabular-nums ${totalPnl >= 0 ? "text-rose-400" : "text-blue-400"}`}>
               {totalKRW > 0 ? `${totalPnl >= 0 ? "+" : ""}${formatNumber(Math.round(totalPnl))}원` : "—"}
             </p>
-            <p className="text-xs text-slate-400 mt-1">
+            <p className="text-xs text-[var(--text-mute)] mt-1">
               {totalPnlRate !== 0 ? `${totalPnlRate >= 0 ? "+" : ""}${totalPnlRate.toFixed(2)}%` : "—"}
             </p>
           </div>
 
-          <div className={`bg-white border rounded-xl p-4 shadow-sm ${dailyPnl >= 0 ? "border-orange-100" : "border-indigo-100"}`}>
+          <div className={`panel p-4 ${dailyPnl >= 0 ? "border-orange-500/20" : "border-indigo-500/20"}`}>
             <div className="flex items-center gap-2 mb-3">
-              <div className={`p-2 rounded-lg ${dailyPnl >= 0 ? "bg-orange-50" : "bg-indigo-50"}`}>
-                {dailyPnl >= 0
-                  ? <ArrowUp className="w-4 h-4 text-orange-500" />
-                  : <ArrowDown className="w-4 h-4 text-indigo-500" />}
+              <div className={`p-2 rounded-lg ${dailyPnl >= 0 ? "bg-orange-500/10" : "bg-indigo-500/10"}`}>
+                {dailyPnl >= 0 ? <ArrowUp className="w-4 h-4 text-orange-400" /> : <ArrowDown className="w-4 h-4 text-indigo-400" />}
               </div>
-              <span className="text-xs text-slate-500 font-medium">일 손익</span>
+              <span className="text-xs text-[var(--text-dim)] font-medium">일 손익</span>
             </div>
-            <p className={`text-xl font-bold tabular-nums ${dailyPnl >= 0 ? "text-orange-500" : "text-indigo-500"}`}>
+            <p className={`text-xl font-bold tabular-nums ${dailyPnl >= 0 ? "text-orange-400" : "text-indigo-400"}`}>
               {totalKRW > 0 ? `${dailyPnl >= 0 ? "+" : ""}${formatNumber(Math.round(dailyPnl))}원` : "—"}
             </p>
-            <p className="text-xs text-slate-400 mt-1">
+            <p className="text-xs text-[var(--text-mute)] mt-1">
               {summary && summary.dailyPnlRate !== 0 ? `${summary.dailyPnlRate >= 0 ? "+" : ""}${summary.dailyPnlRate.toFixed(2)}%` : "—"}
             </p>
           </div>
 
-          <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+          <div className="panel p-4">
             <div className="flex items-center gap-2 mb-3">
-              <div className="p-2 rounded-lg bg-slate-100">
-                <Activity className="w-4 h-4 text-slate-500" />
-              </div>
-              <span className="text-xs text-slate-500 font-medium">관심종목</span>
+              <div className="p-2 rounded-lg bg-white/[0.06]"><Activity className="w-4 h-4 text-[var(--text-dim)]" /></div>
+              <span className="text-xs text-[var(--text-dim)] font-medium">관심종목</span>
             </div>
-            <p className="text-xl font-bold tabular-nums text-slate-700">
+            <p className="text-xl font-bold tabular-nums text-slate-200">
               {prices.length > 0 ? `${winners}↑ / ${losers}↓` : "—"}
             </p>
-            <p className="text-xs text-slate-400 mt-1">전체 {prices.length}종목</p>
+            <p className="text-xs text-[var(--text-mute)] mt-1">전체 {prices.length}종목</p>
           </div>
         </section>
 
@@ -184,27 +189,21 @@ export default function DashboardPage() {
         {summary && (summary.usdMarketValue > 0 || summary.krwMarketValue > 0) && (
           <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {summary.usdMarketValue > 0 && (
-              <div className="bg-white border border-blue-100 rounded-xl p-4 shadow-sm">
+              <div className="panel p-4 border-blue-500/20">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">🇺🇸 미국주식 (USD)</span>
-                  <span className="text-xs text-slate-400">₩{formatNumber(summary.exchangeRate, 1)} 적용</span>
+                  <span className="text-xs font-semibold text-blue-300 bg-blue-500/10 px-2 py-0.5 rounded-full">🇺🇸 미국주식 (USD)</span>
+                  <span className="text-xs text-[var(--text-mute)]">₩{formatNumber(summary.exchangeRate, 1)} 적용</span>
                 </div>
-                <div className="flex items-end justify-between">
-                  <div>
-                    <p className="text-2xl font-bold tabular-nums text-slate-900">${formatNumber(summary.usdMarketValue, 2)}</p>
-                    <p className="text-sm text-slate-500 mt-0.5">≈ {formatNumber(Math.round(summary.usdMarketValueKRW))}원</p>
-                  </div>
-                </div>
+                <p className="text-2xl font-bold tabular-nums text-white">${formatNumber(summary.usdMarketValue, 2)}</p>
+                <p className="text-sm text-[var(--text-dim)] mt-0.5">≈ {formatNumber(Math.round(summary.usdMarketValueKRW))}원</p>
               </div>
             )}
             {summary.krwMarketValue > 0 && (
-              <div className="bg-white border border-rose-100 rounded-xl p-4 shadow-sm">
+              <div className="panel p-4 border-rose-500/20">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-semibold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full">🇰🇷 국내주식 (KRW)</span>
+                  <span className="text-xs font-semibold text-rose-300 bg-rose-500/10 px-2 py-0.5 rounded-full">🇰🇷 국내주식 (KRW)</span>
                 </div>
-                <div>
-                  <p className="text-2xl font-bold tabular-nums text-slate-900">{formatNumber(summary.krwMarketValue)}원</p>
-                </div>
+                <p className="text-2xl font-bold tabular-nums text-white">{formatNumber(summary.krwMarketValue)}원</p>
               </div>
             )}
           </section>
@@ -214,37 +213,25 @@ export default function DashboardPage() {
         <section>
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
-              <Activity className="w-4 h-4 text-slate-400" />
-              <h2 className="text-sm font-semibold text-slate-700">관심종목</h2>
-              <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">US</span>
+              <Activity className="w-4 h-4 text-[var(--text-mute)]" />
+              <h2 className="text-sm font-semibold text-slate-200">관심종목</h2>
+              <span className="text-xs text-[var(--text-mute)] bg-white/[0.06] px-2 py-0.5 rounded-full">US</span>
             </div>
-            <Link href="/watchlist" className="text-xs text-blue-500 hover:text-blue-600 transition-colors font-medium">
-              전체 보기 →
-            </Link>
+            <Link href="/watchlist" className="text-xs text-violet-300 hover:text-violet-200 transition-colors font-medium">전체 보기 →</Link>
           </div>
 
           {loadingPrices ? (
             <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-3">
-              {watchlist.map((s) => (
-                <div key={s} className="h-32 bg-white border border-slate-200 rounded-xl animate-pulse" />
-              ))}
+              {watchlist.map((s) => <div key={s} className="h-32 panel animate-pulse" />)}
             </div>
           ) : prices.length === 0 ? (
-            <div className="bg-white border border-slate-200 rounded-xl p-8 text-center text-slate-400 text-sm">
-              API 응답 없음 — 설정에서 연결을 확인해 주세요
-            </div>
+            <div className="panel p-8 text-center text-[var(--text-mute)] text-sm">API 응답 없음 — 설정에서 연결을 확인해 주세요</div>
           ) : (
             <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-3">
               {prices.map((p) => (
                 <Link key={p.symbol} href={`/market?symbol=${p.symbol}`}>
-                  <PriceCard
-                    symbol={p.symbol}
-                    name={p.symbolName ?? p.symbol}
-                    price={p.currentPrice ?? 0}
-                    change={p.changePrice ?? 0}
-                    changeRate={p.changeRate ?? 0}
-                    volume={p.volume}
-                  />
+                  <PriceCard symbol={p.symbol} name={p.symbolName ?? p.symbol} price={p.currentPrice ?? 0}
+                    change={p.changePrice ?? 0} changeRate={p.changeRate ?? 0} volume={p.volume} />
                 </Link>
               ))}
             </div>
@@ -255,38 +242,26 @@ export default function DashboardPage() {
         <section>
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
-              <Briefcase className="w-4 h-4 text-slate-400" />
-              <h2 className="text-sm font-semibold text-slate-700">보유 종목</h2>
-              {holdings.length > 0 && (
-                <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{holdings.length}종목</span>
-              )}
+              <Briefcase className="w-4 h-4 text-[var(--text-mute)]" />
+              <h2 className="text-sm font-semibold text-slate-200">보유 종목</h2>
+              {holdings.length > 0 && <span className="text-xs text-[var(--text-mute)] bg-white/[0.06] px-2 py-0.5 rounded-full">{holdings.length}종목</span>}
             </div>
-            {holdings.length > 0 && (
-              <Link href="/portfolio" className="text-xs text-blue-500 hover:text-blue-600 font-medium">
-                상세 보기 →
-              </Link>
-            )}
+            {holdings.length > 0 && <Link href="/portfolio" className="text-xs text-violet-300 hover:text-violet-200 font-medium">상세 보기 →</Link>}
           </div>
 
           {!selectedAccount ? (
-            <div className="bg-white border border-slate-200 rounded-xl p-8 text-center text-slate-400 text-sm">
-              상단에서 계좌를 선택하면 보유 종목이 표시됩니다
-            </div>
+            <div className="panel p-8 text-center text-[var(--text-mute)] text-sm">상단에서 계좌를 선택하면 보유 종목이 표시됩니다</div>
           ) : loadingHoldings ? (
-            <div className="bg-white border border-slate-200 rounded-xl p-8 text-center text-slate-400 text-sm animate-pulse">
-              보유 종목 불러오는 중…
-            </div>
+            <div className="panel p-8 text-center text-[var(--text-mute)] text-sm animate-pulse">보유 종목 불러오는 중…</div>
           ) : holdings.length === 0 ? (
-            <div className="bg-white border border-slate-200 rounded-xl p-8 text-center text-slate-400 text-sm">
-              보유 종목이 없습니다
-            </div>
+            <div className="panel p-8 text-center text-[var(--text-mute)] text-sm">보유 종목이 없습니다</div>
           ) : (
-            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+            <div className="panel overflow-hidden">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-slate-100 bg-slate-50">
+                  <tr className="border-b border-[var(--border)] bg-white/[0.03]">
                     {["종목", "수량", "평균단가", "현재가", "평가금액(KRW)", "손익", "수익률"].map((h) => (
-                      <th key={h} className="px-4 py-3 text-xs text-slate-500 text-left font-semibold">{h}</th>
+                      <th key={h} className="px-4 py-3 text-xs text-[var(--text-dim)] text-left font-semibold">{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -295,27 +270,23 @@ export default function DashboardPage() {
                     const isUS = h.currency === "USD";
                     const fmtNative = (v: number) => isUS ? `$${formatNumber(v, 2)}` : `${formatNumber(v, 0)}원`;
                     return (
-                      <tr key={h.symbol} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                      <tr key={h.symbol} className="border-b border-[var(--border)] hover:bg-white/[0.03] transition-colors">
                         <td className="px-4 py-3">
-                          <p className="text-slate-800 font-semibold">{h.symbolName}</p>
-                          <p className="text-xs text-slate-400 font-mono">{h.symbol}</p>
+                          <p className="text-slate-100 font-semibold">{h.symbolName}</p>
+                          <p className="text-xs text-[var(--text-mute)] font-mono">{h.symbol}</p>
                         </td>
-                        <td className="px-4 py-3 tabular-nums text-slate-700">{formatNumber(h.quantity, 0)}</td>
-                        <td className="px-4 py-3 tabular-nums text-slate-500">{fmtNative(h.averagePrice)}</td>
-                        <td className="px-4 py-3 tabular-nums text-slate-700 font-medium">{fmtNative(h.lastPrice)}</td>
-                        <td className="px-4 py-3 tabular-nums text-slate-700">
+                        <td className="px-4 py-3 tabular-nums text-slate-200">{formatNumber(h.quantity, 0)}</td>
+                        <td className="px-4 py-3 tabular-nums text-[var(--text-dim)]">{fmtNative(h.averagePrice)}</td>
+                        <td className="px-4 py-3 tabular-nums text-slate-200 font-medium">{fmtNative(h.lastPrice)}</td>
+                        <td className="px-4 py-3 tabular-nums text-slate-200">
                           <p className="font-medium">{formatNumber(Math.round(h.marketValueKRW), 0)}원</p>
-                          {isUS && (
-                            <p className="text-xs text-slate-400">{fmtNative(h.marketValueNative)}</p>
-                          )}
+                          {isUS && <p className="text-xs text-[var(--text-mute)]">{fmtNative(h.marketValueNative)}</p>}
                         </td>
-                        <td className={`px-4 py-3 tabular-nums font-semibold ${h.profitLossRate >= 0 ? "text-red-500" : "text-blue-500"}`}>
+                        <td className={`px-4 py-3 tabular-nums font-semibold ${h.profitLossRate >= 0 ? "text-rose-400" : "text-blue-400"}`}>
                           <p>{h.profitLossRate >= 0 ? "+" : ""}{fmtNative(h.profitLossNative)}</p>
-                          {isUS && (
-                            <p className="text-xs opacity-70">{h.profitLossRate >= 0 ? "+" : ""}{formatNumber(Math.round(h.profitLossKRW), 0)}원</p>
-                          )}
+                          {isUS && <p className="text-xs opacity-70">{h.profitLossRate >= 0 ? "+" : ""}{formatNumber(Math.round(h.profitLossKRW), 0)}원</p>}
                         </td>
-                        <td className={`px-4 py-3 tabular-nums font-semibold ${h.profitLossRate >= 0 ? "text-red-500" : "text-blue-500"}`}>
+                        <td className={`px-4 py-3 tabular-nums font-semibold ${h.profitLossRate >= 0 ? "text-rose-400" : "text-blue-400"}`}>
                           {h.profitLossRate >= 0 ? "+" : ""}{h.profitLossRate.toFixed(2)}%
                         </td>
                       </tr>

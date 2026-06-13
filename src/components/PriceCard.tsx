@@ -20,21 +20,21 @@ export default function PriceCard({ symbol, name, price, change, changeRate, vol
 
   return (
     <div
-      className="bg-white border border-slate-200 rounded-xl p-4 cursor-pointer hover:border-blue-300 hover:shadow-md transition-all group"
+      className="panel p-4 cursor-pointer hover:border-violet-400/40 hover:bg-white/[0.02] transition-all group"
       onClick={onClick}
     >
       <div className="flex items-start justify-between mb-3">
         <div className="min-w-0">
-          <p className="text-xs text-slate-400 font-mono">{symbol}</p>
-          <p className="text-sm text-slate-800 font-semibold mt-0.5 truncate max-w-[110px]">{name}</p>
+          <p className="text-xs text-[var(--text-mute)] font-mono">{symbol}</p>
+          <p className="text-sm text-slate-200 font-semibold mt-0.5 truncate max-w-[110px]">{name}</p>
         </div>
-        <div className={`p-1.5 rounded-lg ${change > 0 ? "bg-red-50" : change < 0 ? "bg-blue-50" : "bg-slate-100"}`}>
+        <div className={`p-1.5 rounded-lg ${change > 0 ? "bg-rose-500/10" : change < 0 ? "bg-blue-500/10" : "bg-white/5"}`}>
           <Icon className={`w-3.5 h-3.5 ${color}`} />
         </div>
       </div>
-      <p className="text-xl font-bold text-slate-900 tabular-nums">
+      <p className="text-xl font-bold text-white tabular-nums">
         {isUS ? "$" : ""}{formatNumber(price, isUS ? 2 : 0)}
-        {!isUS && <span className="text-xs text-slate-400 ml-1">원</span>}
+        {!isUS && <span className="text-xs text-[var(--text-mute)] ml-1">원</span>}
       </p>
       <div className="flex items-center gap-2 mt-1">
         <span className={`text-xs font-semibold tabular-nums ${color}`}>
@@ -45,7 +45,7 @@ export default function PriceCard({ symbol, name, price, change, changeRate, vol
         </span>
       </div>
       {volume !== undefined && (
-        <p className="text-xs text-slate-400 mt-2">{formatNumber(volume)}</p>
+        <p className="text-xs text-[var(--text-mute)] mt-2">{formatNumber(volume)}</p>
       )}
     </div>
   );
