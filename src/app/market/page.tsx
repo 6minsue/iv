@@ -152,7 +152,7 @@ function MarketContent() {
           }
         })
         .catch(() => {});
-    }, 1000);
+    }, 2500);
     return () => { if (pricePollingRef.current) window.clearInterval(pricePollingRef.current); };
   }, [symbol]);
 

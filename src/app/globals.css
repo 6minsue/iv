@@ -1,23 +1,92 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
+  --bg: #0a0d14;
+  --bg-soft: #0e121b;
+  --surface: #131826;
+  --surface-2: #1a2032;
+  --border: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.12);
+  --text: #e6e9f0;
+  --text-dim: #9aa4b8;
+  --text-mute: #5b6577;
+  --accent: #7c6cff;
+  --accent-2: #4d9bff;
+  --up: #ff5d5d;
+  --down: #4d9bff;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-background: var(--bg);
+  --color-foreground: var(--text);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
+html,
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--bg);
+  color: var(--text);
+}
+
+body {
+  /* 은은한 그라데이션 글로우 + 그리드 배경 (요즘 트렌드) */
+  background-image:
+    radial-gradient(1200px 600px at 12% -8%, rgba(124, 108, 255, 0.12), transparent 60%),
+    radial-gradient(900px 500px at 100% 0%, rgba(77, 155, 255, 0.08), transparent 55%);
+  background-attachment: fixed;
 }
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-color: #2a3346 transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #2a3346;
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #3a4660;
+}
+
+
+::selection {
+  background: rgba(124, 108, 255, 0.3);
+}
+
+@layer components {
+  /* 패널/카드 */
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+  }
+  .panel-2 {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+  .glass {
+    background: rgba(16, 20, 30, 0.7);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border-bottom: 1px solid var(--border);
+  }
+  /* 그라데이션 텍스트/액센트 */
+  .grad-text {
+    background: linear-gradient(120deg, #a78bfa, #60a5fa);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .glow {
+    box-shadow: 0 0 0 1px rgba(124, 108, 255, 0.25), 0 8px 30px -8px rgba(124, 108, 255, 0.45);
+  }
+  .ring-accent {
+    box-shadow: 0 0 0 1px rgba(124, 108, 255, 0.4);
+  }
 }

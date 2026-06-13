@@ -44,7 +44,7 @@ export default function OrderBook({ symbol }: { symbol: string }) {
     if (pollingRef.current) window.clearInterval(pollingRef.current);
     setData(null);
     fetchBook(true);
-    pollingRef.current = window.setInterval(() => fetchBook(false), 2000);
+    pollingRef.current = window.setInterval(() => fetchBook(false), 5000);
     return () => { if (pollingRef.current) window.clearInterval(pollingRef.current); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol]);

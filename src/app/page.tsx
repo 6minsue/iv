@@ -84,7 +84,7 @@ export default function DashboardPage() {
           );
         })
         .catch(() => {});
-    }, 5000);
+    }, 15000);
 
     return () => { if (pollingRef.current) window.clearInterval(pollingRef.current); };
   }, [watchlist]);
