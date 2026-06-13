@@ -8,6 +8,8 @@ import { extractArray } from "@/lib/parse";
 function LiveClock() {
   const [now, setNow] = useState<Date | null>(null);
   useEffect(() => {
+    // 실시간 시계: 외부 시스템(시간) 동기화 목적의 정당한 effect
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setNow(new Date());
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);

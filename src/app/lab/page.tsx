@@ -12,12 +12,15 @@ import {
 import {
   Atom, Play, Repeat, Brain, SlidersHorizontal, Layers, AlertTriangle, ShieldCheck,
   Target, TrendingUp, TrendingDown, Minus, Lightbulb, Crosshair, Wallet, Clock,
+  Cpu, Radar, CheckCircle2, Award,
 } from "lucide-react";
 
-type Tab = "analyze" | "walkforward" | "rl" | "optimize" | "portfolio";
+type Tab = "auto" | "analyze" | "screen" | "walkforward" | "rl" | "optimize" | "portfolio";
 
 const TABS: { id: Tab; label: string; icon: React.ElementType; desc: string }[] = [
+  { id: "auto", label: "오토파일럿", icon: Cpu, desc: "모델이 스스로 선택·앙상블" },
   { id: "analyze", label: "분석 & 추천", icon: Target, desc: "매수·매도·수량 추천" },
+  { id: "screen", label: "종목 발굴", icon: Radar, desc: "국장/미장 스크리너" },
   { id: "walkforward", label: "워크포워드", icon: Repeat, desc: "학습→검증 반복 시뮬" },
   { id: "rl", label: "강화학습", icon: Brain, desc: "Q-러닝 에이전트" },
   { id: "optimize", label: "그리드서치", icon: SlidersHorizontal, desc: "최적화 + 과적합검증" },
@@ -42,7 +45,7 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: "up
 }
 
 export default function ResearchLabPage() {
-  const [tab, setTab] = useState<Tab>("analyze");
+  const [tab, setTab] = useState<Tab>("auto");
 
   return (
     <div className="min-h-screen">
@@ -82,7 +85,9 @@ export default function ResearchLabPage() {
           ))}
         </div>
 
+        {tab === "auto" && <AutoTab />}
         {tab === "analyze" && <AnalyzeTab />}
+        {tab === "screen" && <ScreenTab />}
         {tab === "walkforward" && <WalkForwardTab />}
         {tab === "rl" && <RLTab />}
         {tab === "optimize" && <OptimizeTab />}
@@ -773,6 +778,342 @@ function PortfolioTab() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ============ 공용 분석 결과 뷰 (분석탭/오토탭 공유) ============ */
+interface AnalysisData {
+  symbol: string;
+  isUS: boolean;
+  exchangeRate: number;
+  feeLabel: string;
+  result: AnalyzeResp["result"];
+  analysis: AnalyzeResp["analysis"];
+}
+
+function AnalysisView({ d }: { d: AnalysisData }) {
+  const isUS = d.isUS;
+  const fmtP = (v: number) => (isUS ? `$${formatNumber(v, 2)}` : `${formatNumber(v, 0)}원`);
+  const rec = d.analysis.recommendation;
+  const stats = d.analysis.stats;
+  const m = d.result.metrics;
+  const style = ACTION_STYLE[rec.action];
+  const ActIcon = style.icon;
+  const eq = d.result.equityCurve.map((p) => ({ time: p.time.slice(5, 10), s: (p.equity / 1e7) * 100, b: (p.buyHold / 1e7) * 100 }));
+
+  return (
+    <>
+      <div className={`panel p-6 bg-gradient-to-br ${style.bg} border ${style.ring}`}>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className={`w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center ${style.text}`}><ActIcon className="w-8 h-8" /></div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className={`text-3xl font-extrabold ${style.text}`}>{style.label}</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full bg-white/5 ${style.text}`}>확신도 {rec.conviction}</span>
+              </div>
+              <p className="text-sm text-[var(--text-dim)] mt-1">{rec.reason}</p>
+              <p className="text-xs text-[var(--text-mute)] mt-0.5">{d.symbol} · 현재가 {fmtP(rec.price)}{isUS && ` · ≈${formatNumber(Math.round(rec.price * d.exchangeRate))}원`}</p>
+            </div>
+          </div>
+          {rec.inPosition && rec.unrealizedPct != null && (
+            <div className="text-right">
+              <p className="text-[11px] text-[var(--text-mute)]">미실현 손익</p>
+              <p className={`text-2xl font-bold tabular-nums ${rec.unrealizedPct >= 0 ? "text-rose-400" : "text-blue-400"}`}>{rec.unrealizedPct >= 0 ? "+" : ""}{rec.unrealizedPct.toFixed(2)}%</p>
+              <p className="text-[11px] text-[var(--text-mute)]">{rec.signalAgeBars}봉 보유</p>
+            </div>
+          )}
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-5">
+          <div className="panel-2 px-4 py-3">
+            <div className="flex items-center gap-1.5 mb-1"><Crosshair className="w-3 h-3 text-[var(--text-mute)]" /><p className="text-[11px] text-[var(--text-mute)]">진입가</p></div>
+            <p className="text-base font-bold text-white tabular-nums">{fmtP(rec.price)}</p>
+          </div>
+          <div className="panel-2 px-4 py-3">
+            <p className="text-[11px] text-blue-400 mb-1">손절 (−{(rec.atrPct * 2 * 100).toFixed(1)}%)</p>
+            <p className="text-base font-bold text-blue-400 tabular-nums">{fmtP(rec.stopLoss)}</p>
+          </div>
+          <div className="panel-2 px-4 py-3">
+            <p className="text-[11px] text-rose-400 mb-1">목표 (+{(rec.atrPct * 3 * 100).toFixed(1)}%)</p>
+            <p className="text-base font-bold text-rose-400 tabular-nums">{fmtP(rec.takeProfit)}</p>
+          </div>
+          <div className="panel-2 px-4 py-3">
+            <div className="flex items-center gap-1.5 mb-1"><Wallet className="w-3 h-3 text-[var(--text-mute)]" /><p className="text-[11px] text-[var(--text-mute)]">추천 수량 (1:{rec.riskRewardRatio.toFixed(1)})</p></div>
+            <p className="text-base font-bold text-violet-300 tabular-nums">{isUS ? rec.suggestedShares.toFixed(4) : formatNumber(rec.suggestedShares)}주</p>
+            <p className="text-[10px] text-[var(--text-mute)]">≈{formatNumber(Math.round(rec.suggestedAmountKRW))}원</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2.5">
+        <Stat label="거래당 평균" value={`${stats.avgReturnPct >= 0 ? "+" : ""}${stats.avgReturnPct.toFixed(2)}%`} tone={stats.avgReturnPct >= 0 ? "up" : "down"} />
+        <Stat label="기대값/거래" value={`${stats.expectancyPct >= 0 ? "+" : ""}${stats.expectancyPct.toFixed(2)}%`} tone={stats.expectancyPct >= 0 ? "up" : "down"} />
+        <Stat label="승률" value={`${(stats.winRate * 100).toFixed(0)}%`} />
+        <Stat label="손익비(PF)" value={stats.profitFactor.toFixed(2)} tone={stats.profitFactor >= 1 ? "up" : "down"} />
+        <Stat label="평균 보유" value={`${stats.avgHoldBars.toFixed(0)}봉`} />
+        <Stat label="총 거래" value={String(stats.totalTrades)} />
+        <Stat label="누적수익" value={pct(m.totalReturn)} tone={m.totalReturn >= 0 ? "up" : "down"} />
+        <Stat label="최대낙폭" value={pct(m.maxDrawdown)} tone="down" />
+      </div>
+
+      <div className="panel p-5">
+        <div className="flex items-center gap-2 mb-3"><Lightbulb className="w-4 h-4 text-amber-400" /><h3 className="text-sm font-semibold text-white">인사이트</h3></div>
+        <div className="space-y-2">
+          {d.analysis.insights.map((ins, i) => (
+            <div key={i} className="flex gap-2 text-sm text-[var(--text-dim)] leading-relaxed panel-2 px-3 py-2"><span>{ins}</span></div>
+          ))}
+        </div>
+      </div>
+
+      <div className="panel p-5">
+        <h3 className="text-sm font-semibold text-white mb-1">자산곡선 vs Buy & Hold</h3>
+        <p className="text-[11px] text-[var(--text-mute)] mb-4">거래비용: {d.feeLabel}</p>
+        <ResponsiveContainer width="100%" height={240}>
+          <ComposedChart data={eq}>
+            {grid}
+            <XAxis dataKey="time" {...axis} minTickGap={40} />
+            <YAxis {...axis} width={40} domain={["auto", "auto"]} />
+            <Tooltip {...tip} formatter={(v: unknown, n) => [typeof v === "number" ? v.toFixed(1) : "-", n === "s" ? "전략" : "B&H"]} />
+            <ReferenceLine y={100} stroke="rgba(255,255,255,0.15)" strokeDasharray="2 2" />
+            <Line dataKey="b" stroke="#475569" strokeWidth={1.5} dot={false} name="b" />
+            <Line dataKey="s" stroke="#a78bfa" strokeWidth={2.5} dot={false} name="s" />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className="panel overflow-hidden">
+        <div className="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-white">모의 거래 장부 (언제 사서 / 언제 팔지)</h3>
+          <span className="text-[11px] text-[var(--text-mute)]">{d.result.trades.length}건</span>
+        </div>
+        {d.result.trades.length === 0 ? (
+          <div className="p-8 text-center text-[var(--text-mute)] text-sm">이 구간에서 체결된 거래가 없습니다</div>
+        ) : (
+          <div className="max-h-80 overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-[var(--surface-2)]">
+                <tr>{["#", "매수일", "매수가", "매도일", "매도가", "보유", "수익률"].map((h) => <th key={h} className="px-4 py-2 text-[11px] text-[var(--text-mute)] text-left font-medium">{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {d.result.trades.map((t, i) => (
+                  <tr key={i} className="border-b border-[var(--border)]">
+                    <td className="px-4 py-2 text-xs text-[var(--text-mute)]">{i + 1}</td>
+                    <td className="px-4 py-2 text-xs text-emerald-400/90 font-mono">{t.entryTime.slice(0, 10)}</td>
+                    <td className="px-4 py-2 text-xs text-[var(--text-dim)] tabular-nums">{fmtP(t.entryPrice)}</td>
+                    <td className="px-4 py-2 text-xs text-rose-400/90 font-mono">{t.exitTime.slice(0, 10)}</td>
+                    <td className="px-4 py-2 text-xs text-[var(--text-dim)] tabular-nums">{fmtP(t.exitPrice)}</td>
+                    <td className="px-4 py-2 text-xs text-[var(--text-mute)]">{t.barsHeld}봉</td>
+                    <td className={`px-4 py-2 text-xs font-semibold tabular-nums ${t.pnlPct >= 0 ? "text-rose-400" : "text-blue-400"}`}>{t.pnlPct >= 0 ? "+" : ""}{t.pnlPct.toFixed(2)}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+/* ============ 오토파일럿 (모델이 스스로 선택) ============ */
+interface AutoResp extends AnalysisData {
+  price: number;
+  auto: {
+    trainEndTime: string;
+    candidates: { id: string; kind: string; oosReturn: number; oosSharpe: number; trades: number; selected: boolean; currentSignal: number }[];
+    ensembleMembers: string[];
+    agreement: number;
+    selectedCount: number;
+    lowConfidence: boolean;
+  };
+}
+
+function AutoTab() {
+  const [symbol, setSymbol] = useState("AAPL");
+  const [budget, setBudget] = useState(1_000_000);
+  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState<AutoResp | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const run = async () => {
+    setLoading(true); setErr(null);
+    try {
+      const res = await fetch("/api/quant/auto", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol, interval: "1d", count: 300, budgetKRW: budget }),
+      });
+      const j = await res.json();
+      if (j.error) { setErr(j.error); setData(null); } else setData(j);
+    } catch { setErr("실행 오류"); } finally { setLoading(false); }
+  };
+
+  const kindBadge = (k: string) => k === "ml" ? "bg-violet-500/15 text-violet-300" : k === "rl" ? "bg-emerald-500/15 text-emerald-300" : "bg-blue-500/15 text-blue-300";
+  const kindLabel = (k: string) => k === "ml" ? "딥러닝" : k === "rl" ? "강화학습" : "규칙";
+
+  return (
+    <div className="space-y-4">
+      <div className="panel p-5 grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-2">
+          <SymbolRow symbol={symbol} setSymbol={setSymbol} onRun={run} loading={loading} />
+          <p className="text-[11px] text-[var(--text-mute)] mt-2">규칙전략 6종 + 신경망 + 강화학습을 모두 검증 후 이긴 모델만 앙상블합니다. (참고: FinRL 앙상블 · López de Prado)</p>
+        </div>
+        <Slider label={`투자 예산 ${(budget / 10000).toFixed(0)}만원`} value={budget} min={50000} max={10000000} step={50000} onChange={setBudget} />
+      </div>
+
+      {err && <div className="panel p-4 text-amber-400 text-sm flex items-center gap-2"><AlertTriangle className="w-4 h-4" />{err}</div>}
+      {loading && <div className="panel p-12 text-center text-[var(--text-dim)] text-sm animate-pulse">모델 학습·검증·앙상블 중… (수 초 소요)</div>}
+
+      {data && !loading && (
+        <>
+          {/* 오토파일럿 요약 */}
+          <div className="panel p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <div className="flex items-center gap-2">
+                <Cpu className="w-4 h-4 text-violet-300" />
+                <h3 className="text-sm font-semibold text-white">선택된 모델 앙상블</h3>
+                {data.auto.lowConfidence && <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400">낮은 확신도 — 우위 모델 없음</span>}
+              </div>
+              <span className="text-[11px] text-[var(--text-mute)]">현재 롱 동의율 {(data.auto.agreement * 100).toFixed(0)}% · {data.auto.selectedCount}개 모델</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {data.auto.ensembleMembers.length === 0 && <span className="text-sm text-[var(--text-mute)]">선택된 모델 없음</span>}
+              {data.auto.ensembleMembers.map((mname) => (
+                <span key={mname} className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg bg-violet-500/10 text-violet-200 border border-violet-500/20">
+                  <CheckCircle2 className="w-3 h-3" />{mname}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* 후보 모델 스코어카드 */}
+          <div className="panel overflow-hidden">
+            <div className="px-5 py-3 border-b border-[var(--border)]"><h3 className="text-sm font-semibold text-white">후보 모델 평가 (아웃오브샘플 · 검증학습: {data.auto.trainEndTime?.slice(0, 10)})</h3></div>
+            <table className="w-full text-sm">
+              <thead className="bg-[var(--surface-2)]">
+                <tr>{["모델", "종류", "OOS 수익률", "샤프", "거래", "현재", "선택"].map((h) => <th key={h} className="px-4 py-2 text-[11px] text-[var(--text-mute)] text-left font-medium">{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {data.auto.candidates.map((c) => (
+                  <tr key={c.id} className={`border-b border-[var(--border)] ${c.selected ? "bg-violet-500/5" : ""}`}>
+                    <td className="px-4 py-2 text-xs text-white font-medium">{c.id}</td>
+                    <td className="px-4 py-2"><span className={`text-[10px] px-1.5 py-0.5 rounded ${kindBadge(c.kind)}`}>{kindLabel(c.kind)}</span></td>
+                    <td className={`px-4 py-2 text-xs font-semibold tabular-nums ${c.oosReturn >= 0 ? "text-rose-400" : "text-blue-400"}`}>{pct(c.oosReturn)}</td>
+                    <td className="px-4 py-2 text-xs tabular-nums text-[var(--text-dim)]">{c.oosSharpe.toFixed(2)}</td>
+                    <td className="px-4 py-2 text-xs text-[var(--text-mute)]">{c.trades}</td>
+                    <td className="px-4 py-2 text-xs">{c.currentSignal === 1 ? <span className="text-rose-400">롱</span> : <span className="text-[var(--text-mute)]">현금</span>}</td>
+                    <td className="px-4 py-2">{c.selected ? <CheckCircle2 className="w-4 h-4 text-violet-300" /> : <Minus className="w-4 h-4 text-[var(--text-mute)]" />}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <AnalysisView d={data} />
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ============ 종목 발굴 스크리너 ============ */
+interface ScreenRow {
+  symbol: string; name: string; sector: string; price: number; score: number;
+  signalLabel: string; mom20: number; mom60: number; rsi: number | null; atrPct: number; trend: string;
+}
+interface ScreenResp { market: string; scanned: number; rows: ScreenRow[]; diversified: ScreenRow[]; }
+
+function ScreenTab() {
+  const [market, setMarket] = useState<"KR" | "US">("KR");
+  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState<ScreenResp | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const run = async (mk: "KR" | "US") => {
+    setLoading(true); setErr(null); setMarket(mk);
+    try {
+      const res = await fetch(`/api/quant/screen?market=${mk}`);
+      const j = await res.json();
+      if (j.error) { setErr(j.error); setData(null); } else setData(j);
+    } catch { setErr("실행 오류"); } finally { setLoading(false); }
+  };
+
+  const isUS = market === "US";
+  const fmtP = (v: number) => (isUS ? `$${formatNumber(v, 2)}` : `${formatNumber(v, 0)}원`);
+  const scoreColor = (s: number) => s >= 30 ? "text-rose-400" : s >= 10 ? "text-rose-300" : s <= -30 ? "text-blue-400" : s <= -10 ? "text-blue-300" : "text-[var(--text-dim)]";
+
+  return (
+    <div className="space-y-4">
+      <div className="panel p-5 flex flex-wrap items-center gap-3">
+        <div className="flex gap-1 p-1 bg-white/[0.04] rounded-lg">
+          {(["KR", "US"] as const).map((mk) => (
+            <button key={mk} onClick={() => run(mk)} disabled={loading}
+              className={`px-4 py-1.5 text-xs font-semibold rounded-md transition-all ${market === mk ? "bg-white/[0.08] text-white" : "text-[var(--text-dim)]"}`}>
+              {mk === "KR" ? "🇰🇷 국장" : "🇺🇸 미장"}
+            </button>
+          ))}
+        </div>
+        <button onClick={() => run(market)} disabled={loading}
+          className="flex items-center gap-2 px-5 py-1.5 bg-gradient-to-r from-violet-600 to-blue-600 text-white text-sm font-semibold rounded-xl disabled:opacity-50 glow">
+          {loading ? <span className="animate-pulse">스캔 중…</span> : <><Radar className="w-4 h-4" />스캔</>}
+        </button>
+        <p className="text-[11px] text-[var(--text-mute)]">종합신호 + 모멘텀 블렌드 점수 · 섹터 분산 추천 (레이트리밋으로 수 초 소요)</p>
+      </div>
+
+      {err && <div className="panel p-4 text-amber-400 text-sm">{err}</div>}
+      {loading && <div className="panel p-12 text-center text-[var(--text-dim)] text-sm animate-pulse">{market === "KR" ? "국장" : "미장"} 대형주 스캔 중…</div>}
+
+      {data && !loading && (
+        <>
+          {/* 분산 추천 */}
+          <div className="panel p-5">
+            <div className="flex items-center gap-2 mb-4"><Award className="w-4 h-4 text-amber-400" /><h3 className="text-sm font-semibold text-white">분산 포트폴리오 추천 (섹터 분산)</h3></div>
+            {data.diversified.length === 0 ? (
+              <p className="text-sm text-[var(--text-mute)]">현재 매수 우위(양수 점수) 종목이 없습니다. 관망 권장.</p>
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5">
+                {data.diversified.map((r) => (
+                  <div key={r.symbol} className="panel-2 p-3">
+                    <p className="text-sm font-semibold text-white">{r.name}</p>
+                    <p className="text-[10px] text-[var(--text-mute)] font-mono mb-1">{r.symbol} · {r.sector}</p>
+                    <p className={`text-lg font-bold tabular-nums ${scoreColor(r.score)}`}>{r.score > 0 ? "+" : ""}{r.score}</p>
+                    <p className="text-[10px] text-[var(--text-dim)]">{r.signalLabel} · {r.trend}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* 전체 랭킹 */}
+          <div className="panel overflow-hidden">
+            <div className="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-white">전체 스캔 ({data.scanned}종목)</h3>
+              <span className="text-[11px] text-[var(--text-mute)]">점수 내림차순</span>
+            </div>
+            <div className="max-h-[420px] overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-[var(--surface-2)]">
+                  <tr>{["종목", "섹터", "현재가", "점수", "신호", "20일", "60일", "RSI"].map((h) => <th key={h} className="px-4 py-2 text-[11px] text-[var(--text-mute)] text-left font-medium">{h}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {data.rows.map((r) => (
+                    <tr key={r.symbol} className="border-b border-[var(--border)] hover:bg-white/[0.03]">
+                      <td className="px-4 py-2"><p className="text-xs text-white font-medium">{r.name}</p><p className="text-[10px] text-[var(--text-mute)] font-mono">{r.symbol}</p></td>
+                      <td className="px-4 py-2 text-xs text-[var(--text-dim)]">{r.sector}</td>
+                      <td className="px-4 py-2 text-xs text-[var(--text-dim)] tabular-nums">{fmtP(r.price)}</td>
+                      <td className={`px-4 py-2 text-sm font-bold tabular-nums ${scoreColor(r.score)}`}>{r.score > 0 ? "+" : ""}{r.score}</td>
+                      <td className="px-4 py-2 text-xs text-[var(--text-dim)]">{r.signalLabel}</td>
+                      <td className={`px-4 py-2 text-xs tabular-nums ${r.mom20 >= 0 ? "text-rose-400" : "text-blue-400"}`}>{pct(r.mom20)}</td>
+                      <td className={`px-4 py-2 text-xs tabular-nums ${r.mom60 >= 0 ? "text-rose-400" : "text-blue-400"}`}>{pct(r.mom60)}</td>
+                      <td className="px-4 py-2 text-xs text-[var(--text-mute)] tabular-nums">{r.rsi != null ? r.rsi.toFixed(0) : "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </>
       )}
