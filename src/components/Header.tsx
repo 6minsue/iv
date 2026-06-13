@@ -1,9 +1,29 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown, RefreshCw } from "lucide-react";
 import { useAppStore } from "@/store/useAppStore";
 import { extractArray } from "@/lib/parse";
+
+function LiveClock() {
+  const [now, setNow] = useState<Date | null>(null);
+  useEffect(() => {
+    setNow(new Date());
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <div className="flex items-center gap-2 panel-2 px-3 py-1.5">
+      <span className="relative flex h-2 w-2">
+        <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 animate-ping" />
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+      </span>
+      <span className="text-sm font-mono tabular-nums text-slate-200 min-w-[68px] text-center">
+        {now ? now.toLocaleTimeString("ko-KR", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "--:--:--"}
+      </span>
+    </div>
+  );
+}
 
 export default function Header({ title }: { title: string }) {
   const { accounts, selectedAccount, setAccounts, setSelectedAccount } = useAppStore();
@@ -23,6 +43,7 @@ export default function Header({ title }: { title: string }) {
     <header className="flex items-center justify-between px-6 py-4 glass sticky top-0 z-10">
       <h1 className="text-base font-semibold text-white">{title}</h1>
       <div className="flex items-center gap-3">
+        <LiveClock />
         {accounts.length > 0 && (
           <div className="relative">
             <select

@@ -73,8 +73,6 @@ const INTERVALS: { label: string; value: ChartInterval }[] = [
   { label: "1분", value: "1m" },
   { label: "5분", value: "5m" },
   { label: "15분", value: "15m" },
-  { label: "30분", value: "30m" },
-  { label: "1H", value: "1h" },
   { label: "일봉", value: "1d" },
   { label: "주봉", value: "1w" },
 ];

@@ -14,7 +14,7 @@ import {
 } from "recharts";
 import { format, parseISO } from "date-fns";
 
-export type ChartInterval = "1m" | "5m" | "15m" | "30m" | "1h" | "1d" | "1w";
+export type ChartInterval = "1m" | "5m" | "15m" | "1d" | "1w";
 
 interface Candle {
   time: string;
@@ -33,19 +33,16 @@ interface Props {
 
 const DEFAULT_COUNTS: Record<ChartInterval, number> = {
   "1m":  60,
-  "5m":  80,
-  "15m": 80,
-  "30m": 60,
-  "1h":  60,
-  "1d":  60,
-  "1w":  52,
+  "5m":  70,
+  "15m": 60,
+  "1d":  120,
+  "1w":  60,
 };
 
 function formatTime(timeStr: string, interval: ChartInterval): string {
   try {
     const d = parseISO(timeStr);
     if (interval === "1d" || interval === "1w") return format(d, "MM/dd");
-    if (interval === "1h") return format(d, "dd HH:mm");
     return format(d, "HH:mm");
   } catch {
     return timeStr?.slice(5, 10) ?? "";

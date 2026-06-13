@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
 
   const { symbol, strategy } = body;
   const interval = body.interval ?? "1d";
-  const count = Math.min(Math.max(body.count ?? 200, 60), 200);
+  const count = Math.min(Math.max(body.count ?? 250, 60), 500);
   if (!symbol || !strategy) return NextResponse.json({ error: "symbol, strategy required" }, { status: 400 });
 
   try {
