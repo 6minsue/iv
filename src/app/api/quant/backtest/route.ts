@@ -3,6 +3,7 @@ import { fetchCandlesServer } from "@/lib/server/candles";
 import { generateSignals } from "@/lib/quant/strategies";
 import { runBacktest } from "@/lib/quant/backtest";
 import { runML, type MLConfig } from "@/lib/quant/ml";
+import { runRL, type RLConfig } from "@/lib/quant/rl";
 import { PERIODS_PER_YEAR } from "@/lib/quant/types";
 import type { Position, StrategyId, StrategyParams, BacktestConfig } from "@/lib/quant/types";
 import axios from "axios";
@@ -15,6 +16,7 @@ interface BacktestBody {
   params?: StrategyParams;
   config?: Partial<BacktestConfig>;
   ml?: Partial<MLConfig>;
+  rl?: Partial<RLConfig>;
 }
 
 export async function POST(req: NextRequest) {
@@ -43,11 +45,16 @@ export async function POST(req: NextRequest) {
     let signals: Position[];
     let startIndex = 0;
     let mlInfo: ReturnType<typeof runML> | null = null;
+    let rlInfo: ReturnType<typeof runRL> | null = null;
 
     if (strategy === "ml") {
       mlInfo = runML(bars, body.ml);
       signals = mlInfo.signals;
       startIndex = mlInfo.trainEndIndex; // 아웃오브샘플 구간만 평가
+    } else if (strategy === "rl") {
+      rlInfo = runRL(bars, body.rl);
+      signals = rlInfo.signals;
+      startIndex = rlInfo.trainEndIndex;
     } else {
       signals = generateSignals(bars, strategy, body.params ?? {});
     }
@@ -67,6 +74,13 @@ export async function POST(req: NextRequest) {
             featureNames: mlInfo.featureNames,
             importance: mlInfo.importance,
             metrics: mlInfo.metrics,
+          }
+        : null,
+      rl: rlInfo
+        ? {
+            trainEndIndex: rlInfo.trainEndIndex,
+            trainEndTime: bars[rlInfo.trainEndIndex]?.time ?? null,
+            metrics: rlInfo.metrics,
           }
         : null,
     });

@@ -48,6 +48,12 @@ export const STRATEGIES: StrategyMeta[] = [
     description: "기술적 피처로 다음 구간 상승 확률을 학습해 임계값 초과 시 롱. 워크포워드 아웃오브샘플 평가.",
     defaults: {},
   },
+  {
+    id: "rl",
+    name: "강화학습 (Q-러닝)",
+    description: "이산화된 기술적 국면을 상태로 보상(비용차감 수익률)을 최대화하는 매매 정책을 스스로 학습.",
+    defaults: {},
+  },
 ];
 
 export function getStrategyMeta(id: StrategyId): StrategyMeta | undefined {
@@ -149,7 +155,8 @@ export function generateSignals(
     }
 
     case "ml":
-      // ML 시그널은 ml.ts에서 별도 생성 (학습 필요)
+    case "rl":
+      // ML/RL 시그널은 별도 모듈(ml.ts/rl.ts)에서 학습 후 생성
       return Array(n).fill(0);
 
     default:

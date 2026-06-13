@@ -18,7 +18,8 @@ export type StrategyId =
   | "macd"
   | "bollinger_reversion"
   | "donchian_breakout"
-  | "ml";
+  | "ml"
+  | "rl";
 
 export interface StrategyParams {
   // MA crossover
@@ -41,10 +42,12 @@ export interface StrategyParams {
 
 export interface BacktestConfig {
   initialCapital: number;
-  /** 편도 수수료율 (예: 0.00015 = 0.015%) */
+  /** 편도 수수료율 (예: 0.00015 = 0.015%). 미국주식은 환전 우대 포함 0.0015 권장 */
   commission: number;
   /** 슬리피지율 (체결 불리 폭) */
   slippage: number;
+  /** 매도 시 부과되는 세금(국내 증권거래세 등). 미국은 0. 매도 체결에만 적용 */
+  sellTax: number;
   allowShort: boolean;
   periodsPerYear: number;
 }

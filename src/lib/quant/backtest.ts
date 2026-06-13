@@ -15,6 +15,7 @@ export const DEFAULT_CONFIG: BacktestConfig = {
   initialCapital: 10_000_000,
   commission: 0.00015,
   slippage: 0.0005,
+  sellTax: 0,
   allowShort: false,
   periodsPerYear: 252,
 };
@@ -72,7 +73,8 @@ export function runBacktest(
     if (side === "LONG") {
       cash -= execPrice * quantity + commission;
     } else {
-      cash -= commission; // 담보·손익은 평가식에서 반영
+      // 숏 진입 = 매도 → 매도세 부과
+      cash -= commission + execPrice * quantity * cfg.sellTax;
     }
     open = { side, entryPrice: execPrice, quantity, entryTime: time, entryIndex: index };
   };
@@ -83,10 +85,12 @@ export function runBacktest(
     const notional = open.entryPrice * open.quantity;
     const exitCommission = execPrice * open.quantity * cfg.commission;
     const entryCommission = notional * cfg.commission;
+    // LONG 청산 = 매도 → 매도세. SHORT는 진입 시 이미 부과.
+    const tax = open.side === "LONG" ? execPrice * open.quantity * cfg.sellTax : 0;
     let pnl: number;
     if (open.side === "LONG") {
-      cash += execPrice * open.quantity - exitCommission;
-      pnl = (execPrice - open.entryPrice) * open.quantity - exitCommission - entryCommission;
+      cash += execPrice * open.quantity - exitCommission - tax;
+      pnl = (execPrice - open.entryPrice) * open.quantity - exitCommission - entryCommission - tax;
     } else {
       cash += (open.entryPrice - execPrice) * open.quantity - exitCommission;
       pnl = (open.entryPrice - execPrice) * open.quantity - exitCommission - entryCommission;
