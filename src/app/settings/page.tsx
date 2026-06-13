@@ -57,7 +57,7 @@ export default function SettingsPage() {
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 text-xs text-blue-500 hover:text-blue-600 transition-colors font-medium"
           >
-            토스증권 개발자 포털 <ExternalLink className="w-3 h-3" />
+API 키 발급 (개발자 포털) <ExternalLink className="w-3 h-3" />
           </a>
         </div>
 

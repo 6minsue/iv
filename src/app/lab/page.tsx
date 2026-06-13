@@ -59,9 +59,9 @@ export default function ResearchLabPage() {
               <Atom className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-white">퀀트 리서치 랩</h2>
+              <h2 className="text-lg font-bold text-white">AI 리서치 랩</h2>
               <p className="text-xs text-[var(--text-dim)]">
-                10개월(≤200봉) 데이터 · 워크포워드/CPCV·PBO·DSR로 과적합 없이 검증 · Toss 실거래비용 반영
+                실시간 딥러닝 학습·앙상블 · 워크포워드/CPCV·PBO·DSR로 과적합 없이 검증 · 실거래비용 반영
               </p>
             </div>
           </div>

@@ -39,8 +39,8 @@ interface AppStore {
   removeFromWatchlist: (symbol: string) => void;
 }
 
-// 미국 주식 기본 관심종목
-const DEFAULT_WATCHLIST = ["AAPL", "MSFT", "NVDA", "TSLA", "GOOGL", "AMZN", "META"];
+// 국내주식 기본 주요종목 (수수료 무료)
+const DEFAULT_WATCHLIST = ["005930", "000660", "035420", "035720", "005380", "000270", "051910"];
 
 export const useAppStore = create<AppStore>((set) => ({
   selectedAccount: null,

@@ -152,7 +152,7 @@ export default function StrategyLabPage() {
   })) ?? [];
 
   const tooltipStyle = {
-    contentStyle: { backgroundColor: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, fontSize: 12, boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" },
+    contentStyle: { background: "#131826", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, fontSize: 12, color: "#e6e9f0" },
     labelStyle: { color: "#64748b", fontSize: 11 },
   };
 
@@ -401,7 +401,7 @@ export default function StrategyLabPage() {
               </div>
               <ResponsiveContainer width="100%" height={280}>
                 <ComposedChart data={equityData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                   <XAxis dataKey="time" tick={{ fill: "#94a3b8", fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={40} tickFormatter={(v) => v.slice(5)} />
                   <YAxis tick={{ fill: "#94a3b8", fontSize: 10 }} tickLine={false} axisLine={false} width={40} domain={["auto", "auto"]} />
                   <Tooltip {...tooltipStyle} formatter={(v: unknown, n) => [typeof v === "number" ? v.toFixed(1) : "-", n === "strategy" ? "전략" : "Buy&Hold"]} />
@@ -427,7 +427,7 @@ export default function StrategyLabPage() {
                       <stop offset="100%" stopColor="#f43f5e" stopOpacity={0.35} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                   <XAxis dataKey="time" tick={{ fill: "#94a3b8", fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={40} tickFormatter={(v) => v.slice(5)} />
                   <YAxis tick={{ fill: "#94a3b8", fontSize: 10 }} tickLine={false} axisLine={false} width={40} tickFormatter={(v) => `${v.toFixed(0)}%`} />
                   <Tooltip {...tooltipStyle} formatter={(v: unknown) => [typeof v === "number" ? `${v.toFixed(2)}%` : "-", "낙폭"]} />

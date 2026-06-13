@@ -58,6 +58,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (watchlist.length === 0) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingPrices(true);
     fetch(`/api/prices?symbols=${watchlist.join(",")}`)
       .then((r) => r.json())
@@ -87,6 +88,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!selectedAccount) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingHoldings(true);
     fetch(`/api/holdings?accountSeq=${selectedAccount.accountSeq}`)
       .then((r) => r.json())
@@ -176,7 +178,7 @@ export default function DashboardPage() {
           <div className="panel p-4">
             <div className="flex items-center gap-2 mb-3">
               <div className="p-2 rounded-lg bg-white/[0.06]"><Activity className="w-4 h-4 text-[var(--text-dim)]" /></div>
-              <span className="text-xs text-[var(--text-dim)] font-medium">관심종목</span>
+              <span className="text-xs text-[var(--text-dim)] font-medium">주요 종목</span>
             </div>
             <p className="text-xl font-bold tabular-nums text-slate-200">
               {prices.length > 0 ? `${winners}↑ / ${losers}↓` : "—"}
@@ -214,10 +216,10 @@ export default function DashboardPage() {
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <Activity className="w-4 h-4 text-[var(--text-mute)]" />
-              <h2 className="text-sm font-semibold text-slate-200">관심종목</h2>
-              <span className="text-xs text-[var(--text-mute)] bg-white/[0.06] px-2 py-0.5 rounded-full">US</span>
+              <h2 className="text-sm font-semibold text-slate-200">주요 종목</h2>
+              <span className="text-xs text-[var(--text-mute)] bg-white/[0.06] px-2 py-0.5 rounded-full">국내</span>
             </div>
-            <Link href="/watchlist" className="text-xs text-violet-300 hover:text-violet-200 transition-colors font-medium">전체 보기 →</Link>
+            <Link href="/market" className="text-xs text-violet-300 hover:text-violet-200 transition-colors font-medium">시장 보기 →</Link>
           </div>
 
           {loadingPrices ? (

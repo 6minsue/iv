@@ -3,20 +3,17 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  BarChart2, BookOpen, Briefcase, Home, TrendingUp, Settings,
-  FlaskConical, Gauge, Atom,
+  Briefcase, Home, TrendingUp, Settings, FlaskConical, Gauge, Atom,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const nav = [
   { href: "/", icon: Home, label: "대시보드" },
   { href: "/market", icon: TrendingUp, label: "시장" },
-  { href: "/signals", icon: Gauge, label: "시그널" },
+  { href: "/signals", icon: Gauge, label: "시그널·분석" },
   { href: "/strategy", icon: FlaskConical, label: "전략 연구소" },
   { href: "/lab", icon: Atom, label: "리서치 랩" },
-  { href: "/watchlist", icon: BookOpen, label: "관심종목" },
   { href: "/portfolio", icon: Briefcase, label: "포트폴리오" },
-  { href: "/analytics", icon: BarChart2, label: "분석" },
   { href: "/settings", icon: Settings, label: "설정" },
 ];
 
@@ -30,8 +27,8 @@ export default function Sidebar() {
           <Atom className="w-5 h-5 text-white" />
         </div>
         <div className="hidden lg:block leading-none">
-          <p className="font-bold text-sm tracking-tight grad-text">QUANT IV</p>
-          <p className="text-[var(--text-mute)] text-[11px] mt-1">Terminal</p>
+          <p className="font-bold text-sm tracking-tight grad-text">AI Investment</p>
+          <p className="text-[var(--text-mute)] text-[11px] mt-1">딥러닝 투자 엔진</p>
         </div>
       </div>
 
@@ -62,7 +59,7 @@ export default function Sidebar() {
       <div className="px-4 py-4 border-t border-[var(--border)]">
         <div className="hidden lg:flex items-center gap-2 text-[11px] text-[var(--text-mute)]">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          토스증권 Open API
+          실시간 연결됨
         </div>
       </div>
     </aside>

@@ -224,7 +224,7 @@ export default function PortfolioPage() {
                       ))}
                     </Pie>
                     <Tooltip
-                      contentStyle={{ backgroundColor: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)" }}
+                      contentStyle={{ background: "#131826", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, color: "#e6e9f0" }}
                       formatter={(v: unknown, _: unknown, props: { payload?: { pct?: number } }) => [
                         typeof v === "number"
                           ? `${formatNumber(Math.round(v))}원 (${(props?.payload?.pct ?? 0).toFixed(1)}%)`

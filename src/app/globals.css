@@ -90,3 +90,52 @@ body {
     box-shadow: 0 0 0 1px rgba(124, 108, 255, 0.4);
   }
 }
+
+/* ──────────────────────────────────────────────────────────────
+   라이트 유틸리티 → 다크 매핑 (미전환 페이지 일괄 다크화)
+   이미 var()/panel 토큰을 쓰는 페이지는 영향 없음.
+   ────────────────────────────────────────────────────────────── */
+.bg-white { background-color: var(--surface) !important; }
+.bg-slate-50 { background-color: var(--bg-soft) !important; }
+.bg-slate-100 { background-color: rgba(255, 255, 255, 0.06) !important; }
+.bg-slate-200 { background-color: rgba(255, 255, 255, 0.08) !important; }
+
+.border-slate-200 { border-color: var(--border) !important; }
+.border-slate-100 { border-color: var(--border) !important; }
+.border-slate-300 { border-color: var(--border-strong) !important; }
+.hover\:border-slate-300:hover { border-color: var(--border-strong) !important; }
+.hover\:bg-slate-50:hover { background-color: rgba(255, 255, 255, 0.04) !important; }
+.hover\:bg-slate-100:hover { background-color: rgba(255, 255, 255, 0.06) !important; }
+
+.text-slate-900 { color: #e9edf4 !important; }
+.text-slate-800 { color: #dbe1ea !important; }
+.text-slate-700 { color: #c4ccd8 !important; }
+.text-slate-600 { color: #aab3c2 !important; }
+.text-slate-500 { color: #8b94a6 !important; }
+.text-slate-400 { color: #6b7488 !important; }
+
+/* 옅은 액센트 배경 → 다크 틴트 */
+.bg-blue-50 { background-color: rgba(77, 155, 255, 0.12) !important; }
+.bg-red-50 { background-color: rgba(251, 113, 133, 0.12) !important; }
+.bg-rose-50 { background-color: rgba(251, 113, 133, 0.12) !important; }
+.bg-violet-50 { background-color: rgba(124, 108, 255, 0.14) !important; }
+.bg-emerald-50, .bg-green-50 { background-color: rgba(52, 211, 153, 0.12) !important; }
+.bg-amber-50 { background-color: rgba(245, 158, 11, 0.12) !important; }
+.bg-orange-50 { background-color: rgba(251, 146, 60, 0.12) !important; }
+.bg-indigo-50 { background-color: rgba(129, 140, 248, 0.12) !important; }
+.bg-cyan-50 { background-color: rgba(34, 211, 238, 0.12) !important; }
+
+.border-blue-100, .border-blue-200 { border-color: rgba(77, 155, 255, 0.22) !important; }
+.border-red-100, .border-rose-100 { border-color: rgba(251, 113, 133, 0.22) !important; }
+.border-violet-100 { border-color: rgba(124, 108, 255, 0.22) !important; }
+.border-emerald-100, .border-green-200 { border-color: rgba(52, 211, 153, 0.22) !important; }
+.border-amber-200 { border-color: rgba(245, 158, 11, 0.22) !important; }
+.border-orange-100 { border-color: rgba(251, 146, 60, 0.22) !important; }
+.border-indigo-100 { border-color: rgba(129, 140, 248, 0.22) !important; }
+
+/* 옅은 액센트 텍스트 → 밝은 톤 */
+.text-blue-600, .text-blue-700 { color: #7cb0ff !important; }
+.text-violet-600, .text-violet-700 { color: #b3a6ff !important; }
+.text-rose-600, .text-red-600 { color: #fb7185 !important; }
+.text-emerald-600, .text-green-600, .text-green-700 { color: #34d399 !important; }
+.text-amber-600, .text-amber-700 { color: #fbbf24 !important; }
