@@ -1,24 +1,26 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import Header from "@/components/Header";
 import { STRATEGIES } from "@/lib/quant/strategies";
+import { buildSplit, NeuralModel } from "@/lib/quant/livetrain";
 import type { StrategyId } from "@/lib/quant/types";
 import { pct, formatNumber } from "@/lib/utils";
 import {
-  ResponsiveContainer, ComposedChart, Line, Bar, Cell, Area, AreaChart,
+  ResponsiveContainer, ComposedChart, LineChart, Line, Bar, Cell, Area, AreaChart,
   XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine,
 } from "recharts";
 import {
   Atom, Play, Repeat, Brain, SlidersHorizontal, Layers, AlertTriangle, ShieldCheck,
   Target, TrendingUp, TrendingDown, Minus, Lightbulb, Crosshair, Wallet, Clock,
-  Cpu, Radar, CheckCircle2, Award,
+  Cpu, Radar, CheckCircle2, Award, Zap,
 } from "lucide-react";
 
-type Tab = "auto" | "analyze" | "screen" | "walkforward" | "rl" | "optimize" | "portfolio";
+type Tab = "auto" | "live" | "analyze" | "screen" | "walkforward" | "rl" | "optimize" | "portfolio";
 
 const TABS: { id: Tab; label: string; icon: React.ElementType; desc: string }[] = [
   { id: "auto", label: "오토파일럿", icon: Cpu, desc: "모델이 스스로 선택·앙상블" },
+  { id: "live", label: "실시간 학습", icon: Zap, desc: "딥러닝 실시간 학습·선택" },
   { id: "analyze", label: "분석 & 추천", icon: Target, desc: "매수·매도·수량 추천" },
   { id: "screen", label: "종목 발굴", icon: Radar, desc: "국장/미장 스크리너" },
   { id: "walkforward", label: "워크포워드", icon: Repeat, desc: "학습→검증 반복 시뮬" },
@@ -86,6 +88,7 @@ export default function ResearchLabPage() {
         </div>
 
         {tab === "auto" && <AutoTab />}
+        {tab === "live" && <LiveTrainTab />}
         {tab === "analyze" && <AnalyzeTab />}
         {tab === "screen" && <ScreenTab />}
         {tab === "walkforward" && <WalkForwardTab />}
@@ -1115,6 +1118,216 @@ function ScreenTab() {
               </table>
             </div>
           </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ============ 실시간 학습 (클라이언트 딥러닝 시각화) ============ */
+interface LiveModel {
+  name: string; H: number; color: string;
+  loss: number[]; trainAcc: number[]; testAcc: number[];
+  finalTrain: number; finalTest: number;
+  status: "대기" | "학습중" | "완료";
+}
+const LIVE_CONFIGS = [
+  { name: "로지스틱 회귀", H: 0, color: "#60a5fa" },
+  { name: "신경망 (8유닛)", H: 8, color: "#a78bfa" },
+  { name: "신경망 (16유닛)", H: 16, color: "#34d399" },
+];
+const EPOCHS = 140;
+const BATCH = 3;
+
+function LiveTrainTab() {
+  const [symbol, setSymbol] = useState("005930");
+  const [phase, setPhase] = useState<"idle" | "loading" | "training" | "done">("idle");
+  const [models, setModels] = useState<LiveModel[]>([]);
+  const [activeIdx, setActiveIdx] = useState(-1);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [baseline, setBaseline] = useState(0);
+  const [bestIdx, setBestIdx] = useState<number | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const runningRef = useRef(false);
+
+  const addLog = (s: string) => setLogs((l) => [...l.slice(-60), s]);
+  const sleep = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
+  const snap = (ms: LiveModel[]) => setModels(ms.map((m) => ({ ...m, loss: [...m.loss], trainAcc: [...m.trainAcc], testAcc: [...m.testAcc] })));
+
+  const run = async () => {
+    if (runningRef.current) return;
+    runningRef.current = true;
+    setErr(null); setLogs([]); setBestIdx(null); setActiveIdx(-1); setPhase("loading");
+    try {
+      const res = await fetch(`/api/candles?symbol=${symbol}&interval=1d&count=300`);
+      const j = await res.json();
+      const bars = j.candles ?? [];
+      const split = buildSplit(bars, 5, 0, 0.7);
+      if (!split) { setErr("학습 데이터가 부족합니다 (종목코드를 확인하세요)"); setPhase("idle"); runningRef.current = false; return; }
+      setBaseline(split.posRate);
+      addLog(`📥 데이터 ${bars.length}봉 · 학습 ${split.Xtr.length} / 검증 ${split.Xte.length} 표본 · 피처 ${split.featureNames.length}개`);
+      addLog(`📊 기준선(항상 매수) 정확도 ${(split.posRate * 100).toFixed(1)}%`);
+
+      const ms: LiveModel[] = LIVE_CONFIGS.map((c) => ({ ...c, loss: [], trainAcc: [], testAcc: [], finalTrain: 0, finalTest: 0, status: "대기" }));
+      snap(ms);
+      setPhase("training");
+
+      const F = split.Xtr[0].length;
+      for (let i = 0; i < ms.length; i++) {
+        setActiveIdx(i);
+        ms[i].status = "학습중";
+        addLog(`▶ ${ms[i].name} 학습 시작 ${ms[i].H === 0 ? "(선형)" : `(은닉 ${ms[i].H}유닛)`}`);
+        const model = new NeuralModel(F, ms[i].H, ms[i].H === 0 ? 0.3 : 0.15, 0.0008, 42 + i);
+        for (let e = 0; e < EPOCHS; e++) {
+          const step = model.trainEpoch(split.Xtr, split.Ytr, split.Xte, split.Yte);
+          ms[i].loss.push(step.loss);
+          ms[i].trainAcc.push(step.trainAcc);
+          ms[i].testAcc.push(step.testAcc);
+          if (e % BATCH === 0 || e === EPOCHS - 1) { snap(ms); await sleep(); }
+        }
+        ms[i].finalTrain = ms[i].trainAcc[ms[i].trainAcc.length - 1];
+        ms[i].finalTest = ms[i].testAcc[ms[i].testAcc.length - 1];
+        ms[i].status = "완료";
+        addLog(`✓ ${ms[i].name} 완료 — 검증 정확도 ${(ms[i].finalTest * 100).toFixed(1)}% (학습 ${(ms[i].finalTrain * 100).toFixed(1)}%)`);
+        snap(ms);
+        await sleep();
+      }
+      let best = 0;
+      for (let i = 1; i < ms.length; i++) if (ms[i].finalTest > ms[best].finalTest) best = i;
+      setBestIdx(best);
+      const beat = ms[best].finalTest > split.posRate;
+      addLog(`★ 최종 선택: ${ms[best].name} — 검증 ${(ms[best].finalTest * 100).toFixed(1)}% ${beat ? "> " : "≤ "}기준선 ${(split.posRate * 100).toFixed(1)}% ${beat ? "(기준선 상회 ✓)" : "(기준선 미달 — 예측 우위 약함)"}`);
+      setActiveIdx(-1);
+      setPhase("done");
+    } catch {
+      setErr("학습 중 오류가 발생했습니다");
+      setPhase("idle");
+    } finally {
+      runningRef.current = false;
+    }
+  };
+
+  const maxLen = Math.max(0, ...models.map((m) => m.loss.length));
+  const lossData = Array.from({ length: maxLen }, (_, e) => {
+    const row: Record<string, number | undefined> = { epoch: e };
+    models.forEach((m, i) => { row[`m${i}`] = m.loss[e]; });
+    return row;
+  });
+  const active = activeIdx >= 0 ? models[activeIdx] : null;
+  const activeEpoch = active ? active.loss.length : 0;
+  const liveModel = phase === "done" && bestIdx != null ? models[bestIdx] : active;
+
+  return (
+    <div className="space-y-4">
+      <div className="panel p-5">
+        <div className="flex gap-2">
+          <input value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+            onKeyDown={(e) => e.key === "Enter" && run()}
+            className="flex-1 panel-2 px-3 py-2 text-sm font-mono text-white focus:outline-none focus:border-violet-400" />
+          <button onClick={run} disabled={phase === "loading" || phase === "training"}
+            className="flex items-center gap-2 px-5 py-2 bg-gradient-to-r from-violet-600 to-blue-600 text-white text-sm font-semibold rounded-xl disabled:opacity-50 glow">
+            {phase === "training" ? <span className="animate-pulse">학습 중…</span> : phase === "loading" ? <span className="animate-pulse">로딩…</span> : <><Zap className="w-4 h-4" />학습 시작</>}
+          </button>
+        </div>
+        <p className="text-[11px] text-[var(--text-mute)] mt-2">브라우저에서 로지스틱·신경망(8/16) 3개 모델을 실시간 학습 → 검증 정확도로 자동 선택. 각 {EPOCHS} epoch 경사하강.</p>
+      </div>
+
+      {err && <div className="panel p-4 text-amber-400 text-sm flex items-center gap-2"><AlertTriangle className="w-4 h-4" />{err}</div>}
+
+      {(phase === "training" || phase === "done") && (
+        <>
+          {/* 실시간 상태 */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+            <div className="panel-2 px-4 py-3">
+              <p className="text-[11px] text-[var(--text-mute)] mb-1">{phase === "done" ? "선택 모델" : "학습 중 모델"}</p>
+              <p className="text-base font-bold text-white truncate">{liveModel ? liveModel.name : "—"}</p>
+            </div>
+            <div className="panel-2 px-4 py-3">
+              <p className="text-[11px] text-[var(--text-mute)] mb-1">Epoch</p>
+              <p className="text-base font-bold text-violet-300 tabular-nums">{phase === "done" ? EPOCHS : activeEpoch} / {EPOCHS}</p>
+            </div>
+            <div className="panel-2 px-4 py-3">
+              <p className="text-[11px] text-[var(--text-mute)] mb-1">현재 손실(Loss)</p>
+              <p className="text-base font-bold text-amber-300 tabular-nums">{liveModel && liveModel.loss.length ? liveModel.loss[liveModel.loss.length - 1].toFixed(4) : "—"}</p>
+            </div>
+            <div className="panel-2 px-4 py-3">
+              <p className="text-[11px] text-[var(--text-mute)] mb-1">검증 정확도</p>
+              <p className="text-base font-bold text-emerald-300 tabular-nums">{liveModel && liveModel.testAcc.length ? `${(liveModel.testAcc[liveModel.testAcc.length - 1] * 100).toFixed(1)}%` : "—"}</p>
+            </div>
+          </div>
+
+          {/* 실시간 손실곡선 */}
+          <div className="panel p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-white flex items-center gap-2"><Zap className="w-4 h-4 text-violet-300" />실시간 학습 곡선 (손실)</h3>
+              <div className="flex gap-3 text-xs">
+                {LIVE_CONFIGS.map((c) => (
+                  <span key={c.name} className="flex items-center gap-1.5 text-[var(--text-dim)]"><span className="w-3 h-0.5 inline-block" style={{ background: c.color }} />{c.name}</span>
+                ))}
+              </div>
+            </div>
+            <ResponsiveContainer width="100%" height={240}>
+              <LineChart data={lossData}>
+                {grid}
+                <XAxis dataKey="epoch" {...axis} minTickGap={30} />
+                <YAxis {...axis} width={44} domain={["auto", "auto"]} tickFormatter={(v) => v.toFixed(2)} />
+                <Tooltip {...tip} formatter={(v: unknown, n) => [typeof v === "number" ? v.toFixed(4) : "-", LIVE_CONFIGS[Number(String(n).slice(1))]?.name ?? String(n)]} labelFormatter={(l) => `Epoch ${l}`} />
+                {LIVE_CONFIGS.map((c, i) => (
+                  <Line key={i} dataKey={`m${i}`} stroke={c.color} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls name={`m${i}`} />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* 모델 선택 비교 */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+            {models.map((m, i) => {
+              const selected = bestIdx === i;
+              const isActive = activeIdx === i;
+              return (
+                <div key={i} className={`panel p-4 transition-all ${selected ? "ring-accent border-violet-400/40" : isActive ? "border-[var(--border-strong)]" : ""}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-semibold text-white flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full" style={{ background: m.color }} />{m.name}
+                    </span>
+                    {selected ? <span className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-200"><Award className="w-3 h-3" />선택됨</span>
+                      : <span className={`text-[11px] ${m.status === "완료" ? "text-emerald-400" : m.status === "학습중" ? "text-amber-400 animate-pulse" : "text-[var(--text-mute)]"}`}>{m.status}</span>}
+                  </div>
+                  <div className="space-y-2">
+                    <div>
+                      <div className="flex justify-between text-[11px] mb-1"><span className="text-[var(--text-mute)]">검증 정확도</span><span className="text-white tabular-nums">{m.testAcc.length ? `${(m.testAcc[m.testAcc.length - 1] * 100).toFixed(1)}%` : "—"}</span></div>
+                      <div className="h-2 rounded-full bg-white/5 overflow-hidden relative">
+                        <div className="h-full rounded-full transition-all" style={{ width: `${(m.testAcc.length ? m.testAcc[m.testAcc.length - 1] : 0) * 100}%`, background: m.color }} />
+                        <div className="absolute top-0 bottom-0 w-0.5 bg-white/40" style={{ left: `${baseline * 100}%` }} title="기준선" />
+                      </div>
+                    </div>
+                    <div className="flex justify-between text-[11px]"><span className="text-[var(--text-mute)]">학습 정확도</span><span className="text-[var(--text-dim)] tabular-nums">{m.trainAcc.length ? `${(m.trainAcc[m.trainAcc.length - 1] * 100).toFixed(1)}%` : "—"}</span></div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* 학습 로그 콘솔 */}
+          <div className="panel overflow-hidden">
+            <div className="px-5 py-2.5 border-b border-[var(--border)] flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <h3 className="text-sm font-semibold text-white">학습 로그</h3>
+            </div>
+            <div className="max-h-48 overflow-y-auto p-3 space-y-1 font-mono text-[11px] text-[var(--text-dim)]">
+              {logs.map((l, i) => <div key={i} className="leading-relaxed">{l}</div>)}
+            </div>
+          </div>
+
+          {phase === "done" && bestIdx != null && (
+            <div className="panel p-4 flex items-center gap-2 text-sm border-violet-400/30">
+              <CheckCircle2 className="w-4 h-4 text-violet-300" />
+              <span className="text-[var(--text-dim)]">
+                3개 모델 학습 완료. <span className="text-white font-semibold">{models[bestIdx].name}</span> 이 검증 정확도 {(models[bestIdx].finalTest * 100).toFixed(1)}%로 선택되었습니다
+                {models[bestIdx].finalTest > baseline ? " — 기준선을 상회합니다." : " — 다만 기준선 대비 우위는 제한적입니다(주가 예측의 본질적 난이도)."}
+              </span>
+            </div>
+          )}
         </>
       )}
     </div>
