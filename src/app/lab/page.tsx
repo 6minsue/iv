@@ -3,7 +3,7 @@
 import { useState, useRef } from "react";
 import Header from "@/components/Header";
 import { STRATEGIES } from "@/lib/quant/strategies";
-import { buildSplit, NeuralModel } from "@/lib/quant/livetrain";
+import { buildSplit, NeuralModel, buildSequenceSplit, GRUModel } from "@/lib/quant/livetrain";
 import type { StrategyId } from "@/lib/quant/types";
 import { pct, formatNumber } from "@/lib/utils";
 import {
@@ -1126,15 +1126,16 @@ function ScreenTab() {
 
 /* ============ 실시간 학습 (클라이언트 딥러닝 시각화) ============ */
 interface LiveModel {
-  name: string; H: number; color: string;
+  name: string; H: number; color: string; kind: "dense" | "gru";
   loss: number[]; trainAcc: number[]; testAcc: number[];
   finalTrain: number; finalTest: number;
   status: "대기" | "학습중" | "완료";
 }
-const LIVE_CONFIGS = [
-  { name: "로지스틱 회귀", H: 0, color: "#60a5fa" },
-  { name: "신경망 (8유닛)", H: 8, color: "#a78bfa" },
-  { name: "신경망 (16유닛)", H: 16, color: "#34d399" },
+const LIVE_CONFIGS: { name: string; H: number; color: string; kind: "dense" | "gru" }[] = [
+  { name: "로지스틱 회귀", H: 0, color: "#60a5fa", kind: "dense" },
+  { name: "신경망 (8유닛)", H: 8, color: "#a78bfa", kind: "dense" },
+  { name: "신경망 (16유닛)", H: 16, color: "#34d399", kind: "dense" },
+  { name: "GRU 순환신경망", H: 8, color: "#fbbf24", kind: "gru" },
 ];
 const EPOCHS = 140;
 const BATCH = 3;
@@ -1165,6 +1166,7 @@ function LiveTrainTab() {
       const split = buildSplit(bars, 5, 0, 0.7);
       if (!split) { setErr("학습 데이터가 부족합니다 (종목코드를 확인하세요)"); setPhase("idle"); runningRef.current = false; return; }
       setBaseline(split.posRate);
+      const seqSplit = buildSequenceSplit(bars, 6, 5, 0, 0.7);
       addLog(`📥 데이터 ${bars.length}봉 · 학습 ${split.Xtr.length} / 검증 ${split.Xte.length} 표본 · 피처 ${split.featureNames.length}개`);
       addLog(`📊 기준선(항상 매수) 정확도 ${(split.posRate * 100).toFixed(1)}%`);
 
@@ -1176,13 +1178,25 @@ function LiveTrainTab() {
       for (let i = 0; i < ms.length; i++) {
         setActiveIdx(i);
         ms[i].status = "학습중";
-        addLog(`▶ ${ms[i].name} 학습 시작 ${ms[i].H === 0 ? "(선형)" : `(은닉 ${ms[i].H}유닛)`}`);
-        const model = new NeuralModel(F, ms[i].H, ms[i].H === 0 ? 0.3 : 0.15, 0.0008, 42 + i);
+
+        // GRU(시퀀스) vs Dense 분기. step() 호출이 한 epoch 학습.
+        let step: () => { loss: number; trainAcc: number; testAcc: number };
+        if (ms[i].kind === "gru") {
+          if (!seqSplit) { ms[i].status = "완료"; addLog(`⚠ ${ms[i].name} 건너뜀 — 시퀀스 표본 부족`); snap(ms); await sleep(); continue; }
+          addLog(`▶ ${ms[i].name} 학습 시작 (시퀀스 ${seqSplit.seqLen}봉 · 은닉 ${ms[i].H})`);
+          const gru = new GRUModel(seqSplit.Xtr[0][0].length, ms[i].H, 0.25, 42 + i);
+          step = () => gru.trainEpoch(seqSplit.Xtr, seqSplit.Ytr, seqSplit.Xte, seqSplit.Yte);
+        } else {
+          addLog(`▶ ${ms[i].name} 학습 시작 ${ms[i].H === 0 ? "(선형)" : `(은닉 ${ms[i].H}유닛)`}`);
+          const nn = new NeuralModel(F, ms[i].H, ms[i].H === 0 ? 0.3 : 0.15, 0.0008, 42 + i);
+          step = () => nn.trainEpoch(split.Xtr, split.Ytr, split.Xte, split.Yte);
+        }
+
         for (let e = 0; e < EPOCHS; e++) {
-          const step = model.trainEpoch(split.Xtr, split.Ytr, split.Xte, split.Yte);
-          ms[i].loss.push(step.loss);
-          ms[i].trainAcc.push(step.trainAcc);
-          ms[i].testAcc.push(step.testAcc);
+          const r = step();
+          ms[i].loss.push(r.loss);
+          ms[i].trainAcc.push(r.trainAcc);
+          ms[i].testAcc.push(r.testAcc);
           if (e % BATCH === 0 || e === EPOCHS - 1) { snap(ms); await sleep(); }
         }
         ms[i].finalTrain = ms[i].trainAcc[ms[i].trainAcc.length - 1];
@@ -1280,7 +1294,7 @@ function LiveTrainTab() {
           </div>
 
           {/* 모델 선택 비교 */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {models.map((m, i) => {
               const selected = bestIdx === i;
               const isActive = activeIdx === i;
