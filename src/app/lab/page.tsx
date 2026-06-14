@@ -3,11 +3,13 @@
 import { useState, useRef } from "react";
 import Header from "@/components/Header";
 import { STRATEGIES } from "@/lib/quant/strategies";
-import { buildSplit, NeuralModel, buildSequenceSplit, GRUModel } from "@/lib/quant/livetrain";
+import { buildSplit, NeuralModel, buildSequenceSplit, GRUModel, runGRU } from "@/lib/quant/livetrain";
 import { CANDIDATES, candidateSignals } from "@/lib/quant/autoquant";
 import { runBacktest } from "@/lib/quant/backtest";
 import { analyzeStrategy } from "@/lib/quant/insights";
 import { tossFeeProfile } from "@/lib/quant/fees";
+import { cscvPBO, deflatedSharpe, sharpePerPeriod, skewness, kurtosis } from "@/lib/quant/validation";
+import { runML } from "@/lib/quant/ml";
 import type { StrategyId, Position, BacktestConfig } from "@/lib/quant/types";
 import { pct, formatNumber } from "@/lib/utils";
 import {
@@ -945,6 +947,8 @@ function AutoTab() {
   const [lowConf, setLowConf] = useState(false);
   const [analysisData, setAnalysisData] = useState<AnalysisData | null>(null);
   const [trainEndTime, setTrainEndTime] = useState("");
+  const [pbo, setPbo] = useState<number | null>(null);
+  const [dsr, setDsr] = useState<number | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const runningRef = useRef(false);
   const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -952,7 +956,7 @@ function AutoTab() {
   const run = async () => {
     if (runningRef.current) return;
     runningRef.current = true;
-    setErr(null); setMembers([]); setAnalysisData(null); setPhase("loading");
+    setErr(null); setMembers([]); setAnalysisData(null); setPbo(null); setDsr(null); setPhase("loading");
     try {
       const isUS = !/^\d{6}$/.test(symbol);
       const [cr, er] = await Promise.all([
@@ -972,14 +976,34 @@ function AutoTab() {
       setPhase("evaluating");
 
       const allSignals: Position[][] = [];
+      const candReturns: number[][] = [];
       for (let i = 0; i < CANDIDATES.length; i++) {
         cs[i].status = "평가중"; setCands(cs.map((c) => ({ ...c }))); await sleep(80);
         const signals = candidateSignals(bars, CANDIDATES[i], 0.7);
         allSignals[i] = signals;
         const res = runBacktest(bars, signals, cfg, trainEnd);
+        const eq = res.equityCurve.map((p) => p.equity);
+        const rr: number[] = [];
+        for (let t = 1; t < eq.length; t++) rr.push(eq[t - 1] === 0 ? 0 : eq[t] / eq[t - 1] - 1);
+        candReturns[i] = rr;
         cs[i] = { ...cs[i], oosReturn: res.metrics.totalReturn, oosSharpe: res.metrics.sharpe, trades: res.trades.length, currentSignal: signals[bars.length - 1] ?? 0, status: "완료" };
         setCands(cs.map((c) => ({ ...c }))); await sleep(120);
       }
+
+      // 과적합 진단 (CSCV PBO + DSR) — 9개 후보를 시도집합으로
+      try {
+        const minLen = Math.min(...candReturns.map((c) => c.length));
+        if (minLen > 16) {
+          const matrix: number[][] = [];
+          for (let t = 0; t < minLen; t++) matrix.push(candReturns.map((col) => col[col.length - minLen + t]));
+          const pboRes = cscvPBO(matrix, 8);
+          const perPeriod = candReturns.map((c) => sharpePerPeriod(c));
+          let bi = 0; for (let i = 1; i < cs.length; i++) if (cs[i].oosSharpe > cs[bi].oosSharpe) bi = i;
+          const bestRets = candReturns[bi];
+          const dsrRes = deflatedSharpe(perPeriod, bestRets.length, skewness(bestRets), kurtosis(bestRets));
+          setPbo(pboRes.pbo); setDsr(dsrRes.dsr);
+        }
+      } catch { /* 진단 실패는 무시 */ }
 
       // 선별: OOS 수익>0 & 샤프>0, 상위 4. 없으면 최선 1개(낮은 확신도)
       const ranked = cs.map((c, idx) => ({ c, idx })).filter((x) => x.c.oosReturn > 0 && x.c.oosSharpe > 0).sort((a, b) => b.c.oosSharpe - a.c.oosSharpe);
@@ -1069,6 +1093,17 @@ function AutoTab() {
                   <Award className="w-4 h-4 text-violet-300" />
                   <h3 className="text-sm font-semibold text-white">선택된 모델 앙상블</h3>
                   {lowConf && <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400">낮은 확신도 — 우위 모델 없음</span>}
+                  {pbo != null && (
+                    <span className={`text-[11px] px-2 py-0.5 rounded-full ${pbo > 0.5 ? "bg-amber-500/15 text-amber-400" : "bg-emerald-500/15 text-emerald-300"}`}
+                      title="CSCV 기반 백테스트 과적합 확률 (López de Prado)">
+                      PBO {(pbo * 100).toFixed(0)}%{pbo > 0.5 ? " ⚠ 과적합 위험" : " ✓ 견고"}
+                    </span>
+                  )}
+                  {dsr != null && (
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-white/[0.06] text-[var(--text-dim)]" title="차감 샤프지수 — 선택편향 보정 후 유의 신뢰도">
+                      DSR {(dsr * 100).toFixed(0)}%
+                    </span>
+                  )}
                 </div>
                 <span className="text-[11px] text-[var(--text-mute)]">현재 롱 동의율 {(agreement * 100).toFixed(0)}% · {members.length}개 모델</span>
               </div>
@@ -1216,6 +1251,8 @@ function LiveTrainTab() {
   const [logs, setLogs] = useState<string[]>([]);
   const [baseline, setBaseline] = useState(0);
   const [bestIdx, setBestIdx] = useState<number | null>(null);
+  const [budget, setBudget] = useState(1_000_000);
+  const [analysisData, setAnalysisData] = useState<AnalysisData | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const runningRef = useRef(false);
 
@@ -1226,12 +1263,16 @@ function LiveTrainTab() {
   const run = async () => {
     if (runningRef.current) return;
     runningRef.current = true;
-    setErr(null); setLogs([]); setBestIdx(null); setActiveIdx(-1); setPhase("loading");
+    setErr(null); setLogs([]); setBestIdx(null); setActiveIdx(-1); setAnalysisData(null); setPhase("loading");
     try {
-      const res = await fetch(`/api/candles?symbol=${symbol}&interval=1d&count=200`);
-      const j = await res.json();
+      const isUS = !/^\d{6}$/.test(symbol);
+      const [j, er] = await Promise.all([
+        fetch(`/api/candles?symbol=${symbol}&interval=1d&count=200`).then((r) => r.json()),
+        isUS ? fetch(`/api/exchange-rate`).then((r) => r.json()).catch(() => ({ rate: 1400 })) : Promise.resolve({ rate: 1 }),
+      ]);
       const bars = j.candles ?? [];
       if (!bars.length) { setErr(j?.error?.message ?? "데이터를 불러올 수 없습니다 (잠시 후 재시도)"); setPhase("idle"); runningRef.current = false; return; }
+      const exchangeRate = Number(er.rate ?? 1400);
       const split = buildSplit(bars, 5, 0, 0.7);
       if (!split) { setErr("학습 데이터가 부족합니다 (종목코드를 확인하세요)"); setPhase("idle"); runningRef.current = false; return; }
       setBaseline(split.posRate);
@@ -1280,6 +1321,22 @@ function LiveTrainTab() {
       setBestIdx(best);
       const beat = ms[best].finalTest > split.posRate;
       addLog(`★ 최종 선택: ${ms[best].name} — 검증 ${(ms[best].finalTest * 100).toFixed(1)}% ${beat ? "> " : "≤ "}기준선 ${(split.posRate * 100).toFixed(1)}% ${beat ? "(기준선 상회 ✓)" : "(기준선 미달 — 예측 우위 약함)"}`);
+
+      // 선택된 모델 → 즉시 매수/매도 추천 생성
+      try {
+        const w = LIVE_CONFIGS[best];
+        addLog(`💡 ${w.name} 모델로 현재 매수/매도 추천 생성 중…`);
+        const r = w.kind === "gru"
+          ? runGRU(bars, { H: w.H, trainRatio: 0.7 })
+          : runML(bars, { model: w.H === 0 ? "logistic" : "mlp", hiddenUnits: w.H || 8, trainRatio: 0.7 });
+        const fee = tossFeeProfile(symbol);
+        const cfg: Partial<BacktestConfig> = { initialCapital: 1e7, commission: fee.commission, slippage: fee.slippage, sellTax: fee.sellTax, periodsPerYear: 252 };
+        const bt = runBacktest(bars, r.signals, cfg, r.trainEndIndex);
+        const analysis = analyzeStrategy(bars, r.signals, bt.trades, { isUS, exchangeRate, budgetKRW: budget });
+        setAnalysisData({ symbol, isUS, exchangeRate, feeLabel: fee.label, result: bt, analysis });
+        addLog(`✅ 추천: ${analysis.recommendation.action} (확신도 ${analysis.recommendation.conviction})`);
+      } catch { /* 추천 생성 실패는 무시 */ }
+
       setActiveIdx(-1);
       setPhase("done");
     } catch {
@@ -1302,17 +1359,20 @@ function LiveTrainTab() {
 
   return (
     <div className="space-y-4">
-      <div className="panel p-5">
-        <div className="flex gap-2">
-          <input value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-            onKeyDown={(e) => e.key === "Enter" && run()}
-            className="flex-1 panel-2 px-3 py-2 text-sm font-mono text-white focus:outline-none focus:border-violet-400" />
-          <button onClick={run} disabled={phase === "loading" || phase === "training"}
-            className="flex items-center gap-2 px-5 py-2 bg-gradient-to-r from-violet-600 to-blue-600 text-white text-sm font-semibold rounded-xl disabled:opacity-50 glow">
-            {phase === "training" ? <span className="animate-pulse">학습 중…</span> : phase === "loading" ? <span className="animate-pulse">로딩…</span> : <><Zap className="w-4 h-4" />학습 시작</>}
-          </button>
+      <div className="panel p-5 grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-2">
+          <div className="flex gap-2">
+            <input value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+              onKeyDown={(e) => e.key === "Enter" && run()}
+              className="flex-1 panel-2 px-3 py-2 text-sm font-mono text-white focus:outline-none focus:border-violet-400" />
+            <button onClick={run} disabled={phase === "loading" || phase === "training"}
+              className="flex items-center gap-2 px-5 py-2 bg-gradient-to-r from-violet-600 to-blue-600 text-white text-sm font-semibold rounded-xl disabled:opacity-50 glow">
+              {phase === "training" ? <span className="animate-pulse">학습 중…</span> : phase === "loading" ? <span className="animate-pulse">로딩…</span> : <><Zap className="w-4 h-4" />학습 시작</>}
+            </button>
+          </div>
+          <p className="text-[11px] text-[var(--text-mute)] mt-2">로지스틱·신경망(8/16)·GRU 4개 모델을 브라우저에서 실시간 학습 → 검증 정확도로 자동 선택 → 선택 모델로 즉시 매수/매도 추천. 각 {EPOCHS} epoch.</p>
         </div>
-        <p className="text-[11px] text-[var(--text-mute)] mt-2">브라우저에서 로지스틱·신경망(8/16) 3개 모델을 실시간 학습 → 검증 정확도로 자동 선택. 각 {EPOCHS} epoch 경사하강.</p>
+        <Slider label={`투자 예산 ${(budget / 10000).toFixed(0)}만원`} value={budget} min={50000} max={10000000} step={50000} onChange={setBudget} />
       </div>
 
       {err && <div className="panel p-4 text-amber-400 text-sm flex items-center gap-2"><AlertTriangle className="w-4 h-4" />{err}</div>}
@@ -1406,10 +1466,22 @@ function LiveTrainTab() {
             <div className="panel p-4 flex items-center gap-2 text-sm border-violet-400/30">
               <CheckCircle2 className="w-4 h-4 text-violet-300" />
               <span className="text-[var(--text-dim)]">
-                3개 모델 학습 완료. <span className="text-white font-semibold">{models[bestIdx].name}</span> 이 검증 정확도 {(models[bestIdx].finalTest * 100).toFixed(1)}%로 선택되었습니다
+                4개 모델 학습 완료. <span className="text-white font-semibold">{models[bestIdx].name}</span> 이 검증 정확도 {(models[bestIdx].finalTest * 100).toFixed(1)}%로 선택되었습니다
                 {models[bestIdx].finalTest > baseline ? " — 기준선을 상회합니다." : " — 다만 기준선 대비 우위는 제한적입니다(주가 예측의 본질적 난이도)."}
               </span>
             </div>
+          )}
+
+          {/* 선택된 모델의 즉시 매수/매도 추천 */}
+          {phase === "done" && analysisData && (
+            <>
+              <div className="flex items-center gap-2 pt-1">
+                <Target className="w-4 h-4 text-violet-300" />
+                <h3 className="text-sm font-semibold text-white">선택 모델의 현재 추천</h3>
+                <span className="text-[11px] text-[var(--text-mute)]">{bestIdx != null ? models[bestIdx].name : ""} 기반</span>
+              </div>
+              <AnalysisView d={analysisData} />
+            </>
           )}
         </>
       )}
