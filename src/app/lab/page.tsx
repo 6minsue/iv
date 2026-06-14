@@ -1160,9 +1160,10 @@ function LiveTrainTab() {
     runningRef.current = true;
     setErr(null); setLogs([]); setBestIdx(null); setActiveIdx(-1); setPhase("loading");
     try {
-      const res = await fetch(`/api/candles?symbol=${symbol}&interval=1d&count=300`);
+      const res = await fetch(`/api/candles?symbol=${symbol}&interval=1d&count=200`);
       const j = await res.json();
       const bars = j.candles ?? [];
+      if (!bars.length) { setErr(j?.error?.message ?? "데이터를 불러올 수 없습니다 (잠시 후 재시도)"); setPhase("idle"); runningRef.current = false; return; }
       const split = buildSplit(bars, 5, 0, 0.7);
       if (!split) { setErr("학습 데이터가 부족합니다 (종목코드를 확인하세요)"); setPhase("idle"); runningRef.current = false; return; }
       setBaseline(split.posRate);
