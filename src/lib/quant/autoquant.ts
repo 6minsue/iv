@@ -9,28 +9,32 @@ import { generateSignals } from "./strategies";
 import { runBacktest } from "./backtest";
 import { runML } from "./ml";
 import { runRL } from "./rl";
+import { runGRU } from "./livetrain";
 
-interface Candidate {
+export type CandidateKind = "technical" | "ml" | "rl" | "gru";
+
+export interface Candidate {
   id: string;
-  kind: "technical" | "ml" | "rl";
+  kind: CandidateKind;
   strategy?: StrategyId;
   params?: StrategyParams;
 }
 
-const CANDIDATES: Candidate[] = [
+export const CANDIDATES: Candidate[] = [
   { id: "추세 EMA 20/60", kind: "technical", strategy: "ma_crossover", params: { fast: 20, slow: 60 } },
   { id: "추세 EMA 10/30", kind: "technical", strategy: "ma_crossover", params: { fast: 10, slow: 30 } },
   { id: "RSI 역추세", kind: "technical", strategy: "rsi_reversion", params: { rsiPeriod: 14, oversold: 30, overbought: 70 } },
   { id: "MACD 추세추종", kind: "technical", strategy: "macd", params: {} },
   { id: "볼린저 평균회귀", kind: "technical", strategy: "bollinger_reversion", params: { bbPeriod: 20, bbK: 2 } },
   { id: "돈키언 돌파", kind: "technical", strategy: "donchian_breakout", params: { channel: 20 } },
-  { id: "신경망 (MLP·딥러닝)", kind: "ml" },
+  { id: "신경망 (MLP)", kind: "ml" },
+  { id: "GRU 시계열딥러닝", kind: "gru" },
   { id: "강화학습 (Q-러닝)", kind: "rl" },
 ];
 
 export interface AutoCandidateScore {
   id: string;
-  kind: "technical" | "ml" | "rl";
+  kind: CandidateKind;
   oosReturn: number;
   oosSharpe: number;
   trades: number;
@@ -49,9 +53,10 @@ export interface AutoQuantOutput {
   lowConfidence: boolean;
 }
 
-function candidateSignals(bars: Bar[], c: Candidate, trainRatio: number): Position[] {
+export function candidateSignals(bars: Bar[], c: Candidate, trainRatio: number): Position[] {
   if (c.kind === "ml") return runML(bars, { trainRatio }).signals;
   if (c.kind === "rl") return runRL(bars, { trainRatio }).signals;
+  if (c.kind === "gru") return runGRU(bars, { trainRatio }).signals;
   return generateSignals(bars, c.strategy!, c.params ?? {});
 }
 

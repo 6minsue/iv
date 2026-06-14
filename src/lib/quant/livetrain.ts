@@ -1,7 +1,7 @@
 // 클라이언트 실시간 학습 엔진 (브라우저에서 epoch 단위로 학습 → 손실곡선 실시간 시각화)
 // 순수 TS, 서버 의존성 없음. indicators만 사용.
 
-import type { Bar } from "./types";
+import type { Bar, Position } from "./types";
 import { sma, rsi, macd, bollinger, stochastic, rollingStd, simpleReturns } from "./indicators";
 
 export const LIVE_FEATURES = [
@@ -357,4 +357,58 @@ export class GRUModel {
     u1(this.bz, gbz); u1(this.br, gbr); u1(this.bh, gbh); u1(this.Wo, gWo); this.bo -= lr * gbo / N;
     return { loss: loss / N, trainAcc: this.accuracy(Xtr, Ytr), testAcc: this.accuracy(Xte, Yte) };
   }
+}
+
+/** GRU를 학습해 아웃오브샘플 매매 시그널을 생성 (백테스트/오토퀀트용). runML/runRL와 동일 인터페이스. */
+export function runGRU(
+  bars: Bar[],
+  opts: { seqLen?: number; horizon?: number; trainRatio?: number; epochs?: number; H?: number } = {}
+): { signals: Position[]; trainEndIndex: number; testAccuracy: number } {
+  const seqLen = opts.seqLen ?? 6, horizon = opts.horizon ?? 5, trainRatio = opts.trainRatio ?? 0.7;
+  const epochs = opts.epochs ?? 110, H = opts.H ?? 8;
+  const n = bars.length;
+  const closes = bars.map((b) => b.close);
+  const feat = featureAt(bars);
+  let warmup = 0; while (warmup < n && feat[warmup] == null) warmup++;
+  const trainEndIndex = Math.floor(n * trainRatio);
+  const empty = { signals: Array(n).fill(0) as Position[], trainEndIndex, testAccuracy: 0 };
+
+  const samples: { barIdx: number; seq: number[][]; y: number; hasLabel: boolean }[] = [];
+  for (let i = warmup + seqLen - 1; i < n; i++) {
+    let ok = true; const seq: number[][] = [];
+    for (let t = i - seqLen + 1; t <= i; t++) { if (feat[t] == null) { ok = false; break; } seq.push(feat[t] as number[]); }
+    if (!ok) continue;
+    const hasLabel = i + horizon < n;
+    samples.push({ barIdx: i, seq, y: hasLabel ? (closes[i + horizon] / closes[i] - 1 > 0 ? 1 : 0) : 0, hasLabel });
+  }
+  if (samples.length < 40) return empty;
+
+  const F = samples[0].seq[0].length;
+  const mean = Array(F).fill(0), std = Array(F).fill(0);
+  let cnt = 0;
+  const isTrain = (s: { barIdx: number; hasLabel: boolean }) => s.hasLabel && s.barIdx + horizon <= trainEndIndex;
+  for (const s of samples) if (isTrain(s)) for (const v of s.seq) { for (let j = 0; j < F; j++) mean[j] += v[j]; cnt++; }
+  if (cnt < 20) return empty;
+  for (let j = 0; j < F; j++) mean[j] /= cnt;
+  for (const s of samples) if (isTrain(s)) for (const v of s.seq) for (let j = 0; j < F; j++) std[j] += (v[j] - mean[j]) ** 2;
+  for (let j = 0; j < F; j++) std[j] = Math.sqrt(std[j] / cnt) || 1;
+  const normSeq = (seq: number[][]) => seq.map((v) => v.map((x, j) => (x - mean[j]) / std[j]));
+
+  const Xtr: number[][][] = [], Ytr: number[] = [];
+  for (const s of samples) if (isTrain(s)) { Xtr.push(normSeq(s.seq)); Ytr.push(s.y); }
+  if (Xtr.length < 20) return empty;
+
+  const gru = new GRUModel(F, H, 0.25, 42);
+  const noX: number[][][] = [], noY: number[] = [];
+  for (let e = 0; e < epochs; e++) gru.trainEpoch(Xtr, Ytr, noX, noY);
+
+  const signals: Position[] = Array(n).fill(0);
+  let correct = 0, total = 0;
+  for (const s of samples) {
+    if (s.barIdx <= trainEndIndex) continue;
+    const p = gru.predictProba(normSeq(s.seq));
+    signals[s.barIdx] = p > 0.5 ? 1 : 0;
+    if (s.hasLabel) { total++; if ((p > 0.5 ? 1 : 0) === s.y) correct++; }
+  }
+  return { signals, trainEndIndex, testAccuracy: total ? correct / total : 0 };
 }

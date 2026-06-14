@@ -4,7 +4,11 @@ import { useState, useRef } from "react";
 import Header from "@/components/Header";
 import { STRATEGIES } from "@/lib/quant/strategies";
 import { buildSplit, NeuralModel, buildSequenceSplit, GRUModel } from "@/lib/quant/livetrain";
-import type { StrategyId } from "@/lib/quant/types";
+import { CANDIDATES, candidateSignals } from "@/lib/quant/autoquant";
+import { runBacktest } from "@/lib/quant/backtest";
+import { analyzeStrategy } from "@/lib/quant/insights";
+import { tossFeeProfile } from "@/lib/quant/fees";
+import type { StrategyId, Position, BacktestConfig } from "@/lib/quant/types";
 import { pct, formatNumber } from "@/lib/utils";
 import {
   ResponsiveContainer, ComposedChart, LineChart, Line, Bar, Cell, Area, AreaChart,
@@ -922,100 +926,164 @@ function AnalysisView({ d }: { d: AnalysisData }) {
   );
 }
 
-/* ============ 오토파일럿 (모델이 스스로 선택) ============ */
-interface AutoResp extends AnalysisData {
-  price: number;
-  auto: {
-    trainEndTime: string;
-    candidates: { id: string; kind: string; oosReturn: number; oosSharpe: number; trades: number; selected: boolean; currentSignal: number }[];
-    ensembleMembers: string[];
-    agreement: number;
-    selectedCount: number;
-    lowConfidence: boolean;
-  };
+/* ============ 오토파일럿 (클라이언트 실시간 평가·앙상블) ============ */
+interface CandState {
+  id: string; kind: string;
+  oosReturn: number; oosSharpe: number; trades: number; currentSignal: number;
+  status: "대기" | "평가중" | "완료"; selected: boolean;
 }
+const kindBadge = (k: string) => k === "ml" ? "bg-violet-500/15 text-violet-300" : k === "gru" ? "bg-amber-500/15 text-amber-300" : k === "rl" ? "bg-emerald-500/15 text-emerald-300" : "bg-blue-500/15 text-blue-300";
+const kindLabel = (k: string) => k === "ml" ? "신경망" : k === "gru" ? "시계열딥러닝" : k === "rl" ? "강화학습" : "규칙";
 
 function AutoTab() {
-  const [symbol, setSymbol] = useState("AAPL");
+  const [symbol, setSymbol] = useState("005930");
   const [budget, setBudget] = useState(1_000_000);
-  const [loading, setLoading] = useState(false);
-  const [data, setData] = useState<AutoResp | null>(null);
+  const [phase, setPhase] = useState<"idle" | "loading" | "evaluating" | "done">("idle");
+  const [cands, setCands] = useState<CandState[]>([]);
+  const [members, setMembers] = useState<string[]>([]);
+  const [agreement, setAgreement] = useState(0);
+  const [lowConf, setLowConf] = useState(false);
+  const [analysisData, setAnalysisData] = useState<AnalysisData | null>(null);
+  const [trainEndTime, setTrainEndTime] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  const runningRef = useRef(false);
+  const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
   const run = async () => {
-    setLoading(true); setErr(null);
+    if (runningRef.current) return;
+    runningRef.current = true;
+    setErr(null); setMembers([]); setAnalysisData(null); setPhase("loading");
     try {
-      const res = await fetch("/api/quant/auto", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbol, interval: "1d", count: 300, budgetKRW: budget }),
+      const isUS = !/^\d{6}$/.test(symbol);
+      const [cr, er] = await Promise.all([
+        fetch(`/api/candles?symbol=${symbol}&interval=1d&count=200`).then((r) => r.json()),
+        isUS ? fetch(`/api/exchange-rate`).then((r) => r.json()).catch(() => ({ rate: 1400 })) : Promise.resolve({ rate: 1 }),
+      ]);
+      const bars = cr.candles ?? [];
+      if (bars.length < 80) { setErr("데이터가 부족합니다 (잠시 후 재시도)"); setPhase("idle"); runningRef.current = false; return; }
+      const exchangeRate = Number(er.rate ?? 1400);
+      const fee = tossFeeProfile(symbol);
+      const cfg: Partial<BacktestConfig> = { initialCapital: 1e7, commission: fee.commission, slippage: fee.slippage, sellTax: fee.sellTax, periodsPerYear: 252 };
+      const trainEnd = Math.floor(bars.length * 0.7);
+      setTrainEndTime(bars[trainEnd]?.time?.slice(0, 10) ?? "");
+
+      const cs: CandState[] = CANDIDATES.map((c) => ({ id: c.id, kind: c.kind, oosReturn: 0, oosSharpe: 0, trades: 0, currentSignal: 0, status: "대기", selected: false }));
+      setCands(cs.map((c) => ({ ...c })));
+      setPhase("evaluating");
+
+      const allSignals: Position[][] = [];
+      for (let i = 0; i < CANDIDATES.length; i++) {
+        cs[i].status = "평가중"; setCands(cs.map((c) => ({ ...c }))); await sleep(80);
+        const signals = candidateSignals(bars, CANDIDATES[i], 0.7);
+        allSignals[i] = signals;
+        const res = runBacktest(bars, signals, cfg, trainEnd);
+        cs[i] = { ...cs[i], oosReturn: res.metrics.totalReturn, oosSharpe: res.metrics.sharpe, trades: res.trades.length, currentSignal: signals[bars.length - 1] ?? 0, status: "완료" };
+        setCands(cs.map((c) => ({ ...c }))); await sleep(120);
+      }
+
+      // 선별: OOS 수익>0 & 샤프>0, 상위 4. 없으면 최선 1개(낮은 확신도)
+      const ranked = cs.map((c, idx) => ({ c, idx })).filter((x) => x.c.oosReturn > 0 && x.c.oosSharpe > 0).sort((a, b) => b.c.oosSharpe - a.c.oosSharpe);
+      let chosen = ranked.slice(0, 4);
+      let low = false;
+      if (chosen.length === 0) { chosen = [...cs.map((c, idx) => ({ c, idx }))].sort((a, b) => b.c.oosSharpe - a.c.oosSharpe).slice(0, 1); low = true; }
+      const chosenIdx = new Set(chosen.map((x) => x.idx));
+      for (let i = 0; i < cs.length; i++) cs[i] = { ...cs[i], selected: chosenIdx.has(i) };
+      setCands(cs.map((c) => ({ ...c }))); await sleep(250);
+
+      // 다수결 앙상블
+      const k = chosenIdx.size;
+      const ensembleSignals: Position[] = bars.map((_: unknown, bar: number) => {
+        let v = 0; chosenIdx.forEach((idx) => { if (allSignals[idx][bar] === 1) v++; });
+        return (k > 0 && v > k / 2 ? 1 : 0) as Position;
       });
-      const j = await res.json();
-      if (j.error) { setErr(j.error); setData(null); } else setData(j);
-    } catch { setErr("실행 오류"); } finally { setLoading(false); }
+      let nowLong = 0; chosenIdx.forEach((idx) => { if (allSignals[idx][bars.length - 1] === 1) nowLong++; });
+      const ensembleRes = runBacktest(bars, ensembleSignals, cfg, trainEnd);
+      const analysis = analyzeStrategy(bars, ensembleSignals, ensembleRes.trades, { isUS, exchangeRate, budgetKRW: budget });
+
+      setMembers(chosen.map((x) => cs[x.idx].id));
+      setAgreement(k > 0 ? nowLong / k : 0);
+      setLowConf(low);
+      setAnalysisData({ symbol, isUS, exchangeRate, feeLabel: fee.label, result: ensembleRes, analysis });
+      setPhase("done");
+    } catch {
+      setErr("실행 중 오류가 발생했습니다");
+      setPhase("idle");
+    } finally {
+      runningRef.current = false;
+    }
   };
 
-  const kindBadge = (k: string) => k === "ml" ? "bg-violet-500/15 text-violet-300" : k === "rl" ? "bg-emerald-500/15 text-emerald-300" : "bg-blue-500/15 text-blue-300";
-  const kindLabel = (k: string) => k === "ml" ? "딥러닝" : k === "rl" ? "강화학습" : "규칙";
+  const busy = phase === "loading" || phase === "evaluating";
 
   return (
     <div className="space-y-4">
       <div className="panel p-5 grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2">
-          <SymbolRow symbol={symbol} setSymbol={setSymbol} onRun={run} loading={loading} />
-          <p className="text-[11px] text-[var(--text-mute)] mt-2">규칙전략 6종 + 신경망 + 강화학습을 모두 검증 후 이긴 모델만 앙상블합니다. (참고: FinRL 앙상블 · López de Prado)</p>
+          <SymbolRow symbol={symbol} setSymbol={setSymbol} onRun={run} loading={busy} />
+          <p className="text-[11px] text-[var(--text-mute)] mt-2">규칙전략 6종 + 신경망 + GRU시계열 + 강화학습을 브라우저에서 실시간 평가 → 이긴 모델만 앙상블. (참고: FinRL 앙상블 · López de Prado)</p>
         </div>
         <Slider label={`투자 예산 ${(budget / 10000).toFixed(0)}만원`} value={budget} min={50000} max={10000000} step={50000} onChange={setBudget} />
       </div>
 
       {err && <div className="panel p-4 text-amber-400 text-sm flex items-center gap-2"><AlertTriangle className="w-4 h-4" />{err}</div>}
-      {loading && <div className="panel p-12 text-center text-[var(--text-dim)] text-sm animate-pulse">모델 학습·검증·앙상블 중… (수 초 소요)</div>}
+      {phase === "loading" && <div className="panel p-12 text-center text-[var(--text-dim)] text-sm animate-pulse">데이터 로딩…</div>}
 
-      {data && !loading && (
+      {(phase === "evaluating" || phase === "done") && (
         <>
-          {/* 오토파일럿 요약 */}
-          <div className="panel p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-              <div className="flex items-center gap-2">
-                <Cpu className="w-4 h-4 text-violet-300" />
-                <h3 className="text-sm font-semibold text-white">선택된 모델 앙상블</h3>
-                {data.auto.lowConfidence && <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400">낮은 확신도 — 우위 모델 없음</span>}
-              </div>
-              <span className="text-[11px] text-[var(--text-mute)]">현재 롱 동의율 {(data.auto.agreement * 100).toFixed(0)}% · {data.auto.selectedCount}개 모델</span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {data.auto.ensembleMembers.length === 0 && <span className="text-sm text-[var(--text-mute)]">선택된 모델 없음</span>}
-              {data.auto.ensembleMembers.map((mname) => (
-                <span key={mname} className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg bg-violet-500/10 text-violet-200 border border-violet-500/20">
-                  <CheckCircle2 className="w-3 h-3" />{mname}
-                </span>
-              ))}
-            </div>
-          </div>
-
-          {/* 후보 모델 스코어카드 */}
+          {/* 후보 모델 실시간 평가 스코어카드 */}
           <div className="panel overflow-hidden">
-            <div className="px-5 py-3 border-b border-[var(--border)]"><h3 className="text-sm font-semibold text-white">후보 모델 평가 (아웃오브샘플 · 검증학습: {data.auto.trainEndTime?.slice(0, 10)})</h3></div>
+            <div className="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-white flex items-center gap-2"><Cpu className="w-4 h-4 text-violet-300" />후보 모델 실시간 평가 (아웃오브샘플)</h3>
+              {trainEndTime && <span className="text-[11px] text-[var(--text-mute)]">검증 시작 {trainEndTime}</span>}
+            </div>
             <table className="w-full text-sm">
               <thead className="bg-[var(--surface-2)]">
-                <tr>{["모델", "종류", "OOS 수익률", "샤프", "거래", "현재", "선택"].map((h) => <th key={h} className="px-4 py-2 text-[11px] text-[var(--text-mute)] text-left font-medium">{h}</th>)}</tr>
+                <tr>{["모델", "종류", "OOS 수익률", "샤프", "거래", "현재", "상태"].map((h) => <th key={h} className="px-4 py-2 text-[11px] text-[var(--text-mute)] text-left font-medium">{h}</th>)}</tr>
               </thead>
               <tbody>
-                {data.auto.candidates.map((c) => (
-                  <tr key={c.id} className={`border-b border-[var(--border)] ${c.selected ? "bg-violet-500/5" : ""}`}>
+                {cands.map((c) => (
+                  <tr key={c.id} className={`border-b border-[var(--border)] transition-colors ${c.selected ? "bg-violet-500/5" : ""}`}>
                     <td className="px-4 py-2 text-xs text-white font-medium">{c.id}</td>
                     <td className="px-4 py-2"><span className={`text-[10px] px-1.5 py-0.5 rounded ${kindBadge(c.kind)}`}>{kindLabel(c.kind)}</span></td>
-                    <td className={`px-4 py-2 text-xs font-semibold tabular-nums ${c.oosReturn >= 0 ? "text-rose-400" : "text-blue-400"}`}>{pct(c.oosReturn)}</td>
-                    <td className="px-4 py-2 text-xs tabular-nums text-[var(--text-dim)]">{c.oosSharpe.toFixed(2)}</td>
-                    <td className="px-4 py-2 text-xs text-[var(--text-mute)]">{c.trades}</td>
-                    <td className="px-4 py-2 text-xs">{c.currentSignal === 1 ? <span className="text-rose-400">롱</span> : <span className="text-[var(--text-mute)]">현금</span>}</td>
-                    <td className="px-4 py-2">{c.selected ? <CheckCircle2 className="w-4 h-4 text-violet-300" /> : <Minus className="w-4 h-4 text-[var(--text-mute)]" />}</td>
+                    <td className={`px-4 py-2 text-xs font-semibold tabular-nums ${c.status === "완료" ? (c.oosReturn >= 0 ? "text-rose-400" : "text-blue-400") : "text-[var(--text-mute)]"}`}>{c.status === "완료" ? pct(c.oosReturn) : "—"}</td>
+                    <td className="px-4 py-2 text-xs tabular-nums text-[var(--text-dim)]">{c.status === "완료" ? c.oosSharpe.toFixed(2) : "—"}</td>
+                    <td className="px-4 py-2 text-xs text-[var(--text-mute)]">{c.status === "완료" ? c.trades : "—"}</td>
+                    <td className="px-4 py-2 text-xs">{c.status === "완료" ? (c.currentSignal === 1 ? <span className="text-rose-400">롱</span> : <span className="text-[var(--text-mute)]">현금</span>) : "—"}</td>
+                    <td className="px-4 py-2">
+                      {c.selected ? <span className="flex items-center gap-1 text-[11px] text-violet-300"><CheckCircle2 className="w-3.5 h-3.5" />선택</span>
+                        : c.status === "평가중" ? <span className="text-[11px] text-amber-400 animate-pulse">평가중…</span>
+                        : c.status === "완료" ? <Minus className="w-4 h-4 text-[var(--text-mute)]" />
+                        : <span className="text-[11px] text-[var(--text-mute)]">대기</span>}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
 
-          <AnalysisView d={data} />
+          {/* 앙상블 요약 */}
+          {phase === "done" && (
+            <div className="panel p-5">
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <div className="flex items-center gap-2">
+                  <Award className="w-4 h-4 text-violet-300" />
+                  <h3 className="text-sm font-semibold text-white">선택된 모델 앙상블</h3>
+                  {lowConf && <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400">낮은 확신도 — 우위 모델 없음</span>}
+                </div>
+                <span className="text-[11px] text-[var(--text-mute)]">현재 롱 동의율 {(agreement * 100).toFixed(0)}% · {members.length}개 모델</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {members.map((mname) => (
+                  <span key={mname} className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg bg-violet-500/10 text-violet-200 border border-violet-500/20">
+                    <CheckCircle2 className="w-3 h-3" />{mname}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {phase === "done" && analysisData && <AnalysisView d={analysisData} />}
+          {phase === "evaluating" && <div className="panel p-4 text-center text-[var(--text-dim)] text-sm animate-pulse">모델 평가 진행 중…</div>}
         </>
       )}
     </div>
