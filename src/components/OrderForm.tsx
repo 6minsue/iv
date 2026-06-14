@@ -21,6 +21,7 @@ interface Props {
   currency?: "USD" | "KRW";
   exchangeRate?: number;
   position?: PositionInfo | null;
+  initialSide?: "BUY" | "SELL";
 }
 
 const MAX_ORDER_KRW = Number(process.env.NEXT_PUBLIC_MAX_ORDER_AMOUNT ?? 50000);
@@ -31,17 +32,19 @@ export default function OrderForm({
   currency = "KRW",
   exchangeRate = 1400,
   position = null,
+  initialSide,
 }: Props) {
   const { selectedAccount } = useAppStore();
   const isUSD = currency === "USD";
 
-  const [side, setSide] = useState<"BUY" | "SELL">("BUY");
+  const [side, setSide] = useState<"BUY" | "SELL">(initialSide ?? "BUY");
   const [orderType, setOrderType] = useState<"LIMIT" | "MARKET">("LIMIT");
   const [priceStr, setPriceStr] = useState("");
   const [qtyStr, setQtyStr] = useState(isUSD ? "0.1" : "1");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const userEditedPrice = useRef(false);
+  const appliedInitialSide = useRef(false);
 
   // 현재가 변동 시 지정가 자동 갱신 (사용자가 직접 입력하지 않은 경우)
   useEffect(() => {
@@ -53,11 +56,14 @@ export default function OrderForm({
   // 심볼 / 통화 변경 시 초기화
   useEffect(() => {
     userEditedPrice.current = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPriceStr(isUSD ? currentPrice.toFixed(2) : String(Math.round(currentPrice)));
     setQtyStr(isUSD ? "0.1" : "1");
     setResult(null);
     setOrderType("LIMIT");
-    setSide("BUY");
+    // 추천에서 넘어온 매수/매도는 최초 1회만 반영, 이후 종목 변경 시 매수 기본
+    setSide(!appliedInitialSide.current && initialSide ? initialSide : "BUY");
+    appliedInitialSide.current = true;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol]);
 

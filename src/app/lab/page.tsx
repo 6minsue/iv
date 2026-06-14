@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
+import Link from "next/link";
 import Header from "@/components/Header";
 import { STRATEGIES } from "@/lib/quant/strategies";
 import { buildSplit, NeuralModel, buildSequenceSplit, GRUModel, runGRU } from "@/lib/quant/livetrain";
@@ -19,7 +20,7 @@ import {
 import {
   Atom, Play, Repeat, Brain, SlidersHorizontal, Layers, AlertTriangle, ShieldCheck,
   Target, TrendingUp, TrendingDown, Minus, Lightbulb, Crosshair, Wallet, Clock,
-  Cpu, Radar, CheckCircle2, Award, Zap,
+  Cpu, Radar, CheckCircle2, Award, Zap, ArrowRight,
 } from "lucide-react";
 
 type Tab = "auto" | "live" | "analyze" | "screen" | "walkforward" | "rl" | "optimize" | "portfolio";
@@ -54,6 +55,7 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: "up
 
 export default function ResearchLabPage() {
   const [tab, setTab] = useState<Tab>("auto");
+  const [autoSymbol, setAutoSymbol] = useState<string | null>(null);
 
   return (
     <div className="min-h-screen">
@@ -93,10 +95,10 @@ export default function ResearchLabPage() {
           ))}
         </div>
 
-        {tab === "auto" && <AutoTab />}
+        {tab === "auto" && <AutoTab initialSymbol={autoSymbol} />}
         {tab === "live" && <LiveTrainTab />}
         {tab === "analyze" && <AnalyzeTab />}
-        {tab === "screen" && <ScreenTab />}
+        {tab === "screen" && <ScreenTab onPick={(s) => { setAutoSymbol(s); setTab("auto"); }} />}
         {tab === "walkforward" && <WalkForwardTab />}
         {tab === "rl" && <RLTab />}
         {tab === "optimize" && <OptimizeTab />}
@@ -856,6 +858,13 @@ function AnalysisView({ d }: { d: AnalysisData }) {
             <p className="text-[10px] text-[var(--text-mute)]">≈{formatNumber(Math.round(rec.suggestedAmountKRW))}원</p>
           </div>
         </div>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[11px] text-[var(--text-mute)]">손절·목표는 ATR 기반 추정치 · 실거래는 본인 판단, 주문당 5만원 한도</p>
+          <Link href={`/market?symbol=${d.symbol}&side=${rec.action === "SELL" ? "SELL" : "BUY"}`}
+            className="flex items-center gap-1.5 text-xs font-semibold px-3.5 py-1.5 rounded-lg bg-white/[0.08] text-white hover:bg-white/[0.16] transition-colors">
+            주문창으로 <ArrowRight className="w-3.5 h-3.5" />
+          </Link>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2.5">
@@ -937,7 +946,7 @@ interface CandState {
 const kindBadge = (k: string) => k === "ml" ? "bg-violet-500/15 text-violet-300" : k === "gru" ? "bg-amber-500/15 text-amber-300" : k === "rl" ? "bg-emerald-500/15 text-emerald-300" : "bg-blue-500/15 text-blue-300";
 const kindLabel = (k: string) => k === "ml" ? "신경망" : k === "gru" ? "시계열딥러닝" : k === "rl" ? "강화학습" : "규칙";
 
-function AutoTab() {
+function AutoTab({ initialSymbol }: { initialSymbol?: string | null }) {
   const [symbol, setSymbol] = useState("005930");
   const [budget, setBudget] = useState(1_000_000);
   const [phase, setPhase] = useState<"idle" | "loading" | "evaluating" | "done">("idle");
@@ -953,20 +962,21 @@ function AutoTab() {
   const runningRef = useRef(false);
   const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-  const run = async () => {
+  const run = async (symbolArg?: string) => {
     if (runningRef.current) return;
+    const sym = symbolArg ?? symbol;
     runningRef.current = true;
     setErr(null); setMembers([]); setAnalysisData(null); setPbo(null); setDsr(null); setPhase("loading");
     try {
-      const isUS = !/^\d{6}$/.test(symbol);
+      const isUS = !/^\d{6}$/.test(sym);
       const [cr, er] = await Promise.all([
-        fetch(`/api/candles?symbol=${symbol}&interval=1d&count=200`).then((r) => r.json()),
+        fetch(`/api/candles?symbol=${sym}&interval=1d&count=200`).then((r) => r.json()),
         isUS ? fetch(`/api/exchange-rate`).then((r) => r.json()).catch(() => ({ rate: 1400 })) : Promise.resolve({ rate: 1 }),
       ]);
       const bars = cr.candles ?? [];
       if (bars.length < 80) { setErr("데이터가 부족합니다 (잠시 후 재시도)"); setPhase("idle"); runningRef.current = false; return; }
       const exchangeRate = Number(er.rate ?? 1400);
-      const fee = tossFeeProfile(symbol);
+      const fee = tossFeeProfile(sym);
       const cfg: Partial<BacktestConfig> = { initialCapital: 1e7, commission: fee.commission, slippage: fee.slippage, sellTax: fee.sellTax, periodsPerYear: 252 };
       const trainEnd = Math.floor(bars.length * 0.7);
       setTrainEndTime(bars[trainEnd]?.time?.slice(0, 10) ?? "");
@@ -1027,7 +1037,7 @@ function AutoTab() {
       setMembers(chosen.map((x) => cs[x.idx].id));
       setAgreement(k > 0 ? nowLong / k : 0);
       setLowConf(low);
-      setAnalysisData({ symbol, isUS, exchangeRate, feeLabel: fee.label, result: ensembleRes, analysis });
+      setAnalysisData({ symbol: sym, isUS, exchangeRate, feeLabel: fee.label, result: ensembleRes, analysis });
       setPhase("done");
     } catch {
       setErr("실행 중 오류가 발생했습니다");
@@ -1036,6 +1046,13 @@ function AutoTab() {
       runningRef.current = false;
     }
   };
+
+  // 종목 발굴에서 넘어온 종목 자동 분석 (외부 입력 동기화 목적의 정당한 effect)
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (initialSymbol) { setSymbol(initialSymbol); run(initialSymbol); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSymbol]);
 
   const busy = phase === "loading" || phase === "evaluating";
 
@@ -1132,7 +1149,7 @@ interface ScreenRow {
 }
 interface ScreenResp { market: string; scanned: number; rows: ScreenRow[]; diversified: ScreenRow[]; }
 
-function ScreenTab() {
+function ScreenTab({ onPick }: { onPick: (symbol: string) => void }) {
   const [market, setMarket] = useState<"KR" | "US">("KR");
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<ScreenResp | null>(null);
@@ -1182,12 +1199,13 @@ function ScreenTab() {
             ) : (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5">
                 {data.diversified.map((r) => (
-                  <div key={r.symbol} className="panel-2 p-3">
+                  <button key={r.symbol} onClick={() => onPick(r.symbol)}
+                    className="panel-2 p-3 text-left hover:border-violet-400/40 hover:bg-white/[0.03] transition-all">
                     <p className="text-sm font-semibold text-white">{r.name}</p>
                     <p className="text-[10px] text-[var(--text-mute)] font-mono mb-1">{r.symbol} · {r.sector}</p>
                     <p className={`text-lg font-bold tabular-nums ${scoreColor(r.score)}`}>{r.score > 0 ? "+" : ""}{r.score}</p>
-                    <p className="text-[10px] text-[var(--text-dim)]">{r.signalLabel} · {r.trend}</p>
-                  </div>
+                    <p className="text-[10px] text-violet-300">{r.signalLabel} · {r.trend} · 분석 →</p>
+                  </button>
                 ))}
               </div>
             )}
@@ -1206,7 +1224,7 @@ function ScreenTab() {
                 </thead>
                 <tbody>
                   {data.rows.map((r) => (
-                    <tr key={r.symbol} className="border-b border-[var(--border)] hover:bg-white/[0.03]">
+                    <tr key={r.symbol} onClick={() => onPick(r.symbol)} className="border-b border-[var(--border)] hover:bg-white/[0.03] cursor-pointer">
                       <td className="px-4 py-2"><p className="text-xs text-white font-medium">{r.name}</p><p className="text-[10px] text-[var(--text-mute)] font-mono">{r.symbol}</p></td>
                       <td className="px-4 py-2 text-xs text-[var(--text-dim)]">{r.sector}</td>
                       <td className="px-4 py-2 text-xs text-[var(--text-dim)] tabular-nums">{fmtP(r.price)}</td>

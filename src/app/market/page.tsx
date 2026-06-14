@@ -81,7 +81,8 @@ function MarketContent() {
   const params = useSearchParams();
   const { selectedAccount } = useAppStore();
 
-  const [symbol, setSymbol] = useState(params.get("symbol") ?? "AAPL");
+  const [symbol, setSymbol] = useState(params.get("symbol") ?? "005930");
+  const initialSide = params.get("side") === "SELL" ? "SELL" : params.get("side") === "BUY" ? "BUY" : undefined;
   const [market, setMarket] = useState<"US" | "KR">("US");
   const [search, setSearch] = useState("");
   const [price, setPrice] = useState<PriceData | null>(null);
@@ -107,12 +108,14 @@ function MarketContent() {
   useEffect(() => {
     try {
       const saved = localStorage.getItem("iv_recent_symbols");
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (saved) setRecent(JSON.parse(saved));
     } catch {}
   }, []);
 
   // 계좌 보유 현황 조회 (계좌 변경 시)
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!selectedAccount) { setHoldings([]); return; }
     fetch(`/api/holdings?accountSeq=${selectedAccount.accountSeq}`)
       .then((r) => r.json())
@@ -122,6 +125,7 @@ function MarketContent() {
 
   // 전체 시세 조회 (심볼 변경 시)
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     fetch(`/api/prices?symbols=${symbol}`)
       .then((r) => r.json())
@@ -415,6 +419,7 @@ function MarketContent() {
                     currency={currency}
                     exchangeRate={exchangeRate}
                     position={position}
+                    initialSide={initialSide}
                   />
                 </div>
               </div>
