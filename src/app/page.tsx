@@ -258,8 +258,8 @@ export default function DashboardPage() {
           ) : holdings.length === 0 ? (
             <div className="panel p-8 text-center text-[var(--text-mute)] text-sm">보유 종목이 없습니다</div>
           ) : (
-            <div className="panel overflow-hidden">
-              <table className="w-full text-sm">
+            <div className="panel overflow-x-auto">
+              <table className="w-full text-sm min-w-[640px]">
                 <thead>
                   <tr className="border-b border-[var(--border)] bg-white/[0.03]">
                     {["종목", "수량", "평균단가", "현재가", "평가금액(KRW)", "손익", "수익률"].map((h) => (

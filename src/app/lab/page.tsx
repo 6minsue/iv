@@ -320,7 +320,7 @@ function AnalyzeTab() {
             {data!.result.trades.length === 0 ? (
               <div className="p-8 text-center text-[var(--text-mute)] text-sm">이 구간에서 체결된 거래가 없습니다</div>
             ) : (
-              <div className="max-h-80 overflow-y-auto">
+              <div className="max-h-80 overflow-auto">
                 <table className="w-full text-sm">
                   <thead className="sticky top-0 bg-[var(--surface-2)]">
                     <tr>{["#", "매수일", "매수가", "매도일", "매도가", "보유", "수익률"].map((h) => <th key={h} className="px-4 py-2 text-[11px] text-[var(--text-mute)] text-left font-medium">{h}</th>)}</tr>
@@ -458,7 +458,7 @@ function WalkForwardTab() {
             </div>
             <div className="panel overflow-hidden">
               <div className="px-5 py-3 border-b border-[var(--border)]"><h3 className="text-sm font-semibold text-white">폴드 상세</h3></div>
-              <div className="max-h-[200px] overflow-y-auto">
+              <div className="max-h-[200px] overflow-auto">
                 <table className="w-full text-sm">
                   <thead className="sticky top-0 bg-[var(--surface-2)]">
                     <tr>{["#", "검증구간", "수익률", "vs B&H", "거래"].map((h) => <th key={h} className="px-4 py-2 text-[11px] text-[var(--text-mute)] text-left font-medium">{h}</th>)}</tr>
@@ -662,7 +662,7 @@ function OptimizeTab() {
               <h3 className="text-sm font-semibold text-white">설정 랭킹 (샤프 내림차순)</h3>
               <span className="text-[11px] text-[var(--text-mute)]">최적: {Object.entries(r.best.params).map(([k, v]) => `${k}=${v}`).join(" · ")}</span>
             </div>
-            <div className="max-h-80 overflow-y-auto">
+            <div className="max-h-80 overflow-auto">
               <table className="w-full text-sm">
                 <thead className="sticky top-0 bg-[var(--surface-2)]">
                   <tr>{["순위", "파라미터", "샤프", "수익률", "MDD", "거래"].map((h) => <th key={h} className="px-4 py-2 text-[11px] text-[var(--text-mute)] text-left font-medium">{h}</th>)}</tr>
@@ -771,7 +771,7 @@ function PortfolioTab() {
             </ResponsiveContainer>
           </div>
 
-          <div className="panel overflow-hidden">
+          <div className="panel overflow-x-auto">
             <div className="px-5 py-3 border-b border-[var(--border)]"><h3 className="text-sm font-semibold text-white">종목별 기여</h3></div>
             <table className="w-full text-sm">
               <thead className="bg-[var(--surface-2)]">
@@ -911,7 +911,7 @@ function AnalysisView({ d }: { d: AnalysisData }) {
         {d.result.trades.length === 0 ? (
           <div className="p-8 text-center text-[var(--text-mute)] text-sm">이 구간에서 체결된 거래가 없습니다</div>
         ) : (
-          <div className="max-h-80 overflow-y-auto">
+          <div className="max-h-80 overflow-auto">
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-[var(--surface-2)]">
                 <tr>{["#", "매수일", "매수가", "매도일", "매도가", "보유", "수익률"].map((h) => <th key={h} className="px-4 py-2 text-[11px] text-[var(--text-mute)] text-left font-medium">{h}</th>)}</tr>
@@ -1072,7 +1072,7 @@ function AutoTab({ initialSymbol }: { initialSymbol?: string | null }) {
       {(phase === "evaluating" || phase === "done") && (
         <>
           {/* 후보 모델 실시간 평가 스코어카드 */}
-          <div className="panel overflow-hidden">
+          <div className="panel overflow-x-auto">
             <div className="px-5 py-3 border-b border-[var(--border)] flex items-center justify-between">
               <h3 className="text-sm font-semibold text-white flex items-center gap-2"><Cpu className="w-4 h-4 text-violet-300" />후보 모델 실시간 평가 (아웃오브샘플)</h3>
               {trainEndTime && <span className="text-[11px] text-[var(--text-mute)]">검증 시작 {trainEndTime}</span>}
@@ -1217,7 +1217,7 @@ function ScreenTab({ onPick }: { onPick: (symbol: string) => void }) {
               <h3 className="text-sm font-semibold text-white">전체 스캔 ({data.scanned}종목)</h3>
               <span className="text-[11px] text-[var(--text-mute)]">점수 내림차순</span>
             </div>
-            <div className="max-h-[420px] overflow-y-auto">
+            <div className="max-h-[420px] overflow-auto">
               <table className="w-full text-sm">
                 <thead className="sticky top-0 bg-[var(--surface-2)]">
                   <tr>{["종목", "섹터", "현재가", "점수", "신호", "20일", "60일", "RSI"].map((h) => <th key={h} className="px-4 py-2 text-[11px] text-[var(--text-mute)] text-left font-medium">{h}</th>)}</tr>
@@ -1371,6 +1371,11 @@ function LiveTrainTab() {
     models.forEach((m, i) => { row[`m${i}`] = m.loss[e]; });
     return row;
   });
+  const accData = Array.from({ length: maxLen }, (_, e) => {
+    const row: Record<string, number | undefined> = { epoch: e };
+    models.forEach((m, i) => { row[`m${i}`] = m.testAcc[e] != null ? m.testAcc[e] * 100 : undefined; });
+    return row;
+  });
   const active = activeIdx >= 0 ? models[activeIdx] : null;
   const activeEpoch = active ? active.loss.length : 0;
   const liveModel = phase === "done" && bestIdx != null ? models[bestIdx] : active;
@@ -1427,17 +1432,34 @@ function LiveTrainTab() {
                 ))}
               </div>
             </div>
-            <ResponsiveContainer width="100%" height={240}>
-              <LineChart data={lossData}>
-                {grid}
-                <XAxis dataKey="epoch" {...axis} minTickGap={30} />
-                <YAxis {...axis} width={44} domain={["auto", "auto"]} tickFormatter={(v) => v.toFixed(2)} />
-                <Tooltip {...tip} formatter={(v: unknown, n) => [typeof v === "number" ? v.toFixed(4) : "-", LIVE_CONFIGS[Number(String(n).slice(1))]?.name ?? String(n)]} labelFormatter={(l) => `Epoch ${l}`} />
-                {LIVE_CONFIGS.map((c, i) => (
-                  <Line key={i} dataKey={`m${i}`} stroke={c.color} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls name={`m${i}`} />
-                ))}
-              </LineChart>
-            </ResponsiveContainer>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={lossData}>
+                  {grid}
+                  <XAxis dataKey="epoch" {...axis} minTickGap={30} />
+                  <YAxis {...axis} width={44} domain={["auto", "auto"]} tickFormatter={(v) => v.toFixed(2)} />
+                  <Tooltip {...tip} formatter={(v: unknown, n) => [typeof v === "number" ? v.toFixed(4) : "-", LIVE_CONFIGS[Number(String(n).slice(1))]?.name ?? String(n)]} labelFormatter={(l) => `Epoch ${l} · 손실`} />
+                  {LIVE_CONFIGS.map((c, i) => (
+                    <Line key={i} dataKey={`m${i}`} stroke={c.color} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls name={`m${i}`} />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={accData}>
+                  {grid}
+                  <XAxis dataKey="epoch" {...axis} minTickGap={30} />
+                  <YAxis {...axis} width={44} domain={[35, 75]} tickFormatter={(v) => `${v.toFixed(0)}%`} />
+                  <Tooltip {...tip} formatter={(v: unknown, n) => [typeof v === "number" ? `${v.toFixed(1)}%` : "-", LIVE_CONFIGS[Number(String(n).slice(1))]?.name ?? String(n)]} labelFormatter={(l) => `Epoch ${l} · 검증정확도`} />
+                  <ReferenceLine y={baseline * 100} stroke="#94a3b8" strokeDasharray="4 3" strokeOpacity={0.6} label={{ value: "기준선", fontSize: 9, fill: "#94a3b8", position: "insideTopRight" }} />
+                  {LIVE_CONFIGS.map((c, i) => (
+                    <Line key={i} dataKey={`m${i}`} stroke={c.color} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls name={`m${i}`} />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="flex gap-4 text-[11px] text-[var(--text-mute)] mt-2 justify-center">
+              <span>← 손실(낮을수록 좋음)</span><span>검증정확도(기준선 상회 = 예측 우위) →</span>
+            </div>
           </div>
 
           {/* 모델 선택 비교 */}

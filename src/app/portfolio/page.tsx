@@ -91,6 +91,7 @@ export default function PortfolioPage() {
 
   useEffect(() => {
     if (!selectedAccount) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     fetch(`/api/holdings?accountSeq=${selectedAccount.accountSeq}`)
       .then((r) => r.json())
@@ -240,8 +241,8 @@ export default function PortfolioPage() {
               </div>
 
               {/* 보유 목록 */}
-              <div className="lg:col-span-2 bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                <table className="w-full text-sm">
+              <div className="lg:col-span-2 bg-white border border-slate-200 rounded-xl overflow-x-auto shadow-sm">
+                <table className="w-full text-sm min-w-[560px]">
                   <thead>
                     <tr className="border-b border-slate-100 bg-slate-50">
                       {["종목", "비중", "수량", "평균단가", "현재가", "평가금액", "손익 / 수익률"].map((h) => (
