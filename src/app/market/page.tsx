@@ -221,10 +221,10 @@ function MarketContent() {
   return (
     <div className="flex flex-col min-h-screen bg-slate-50">
       <Header title="시장" />
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-col lg:flex-row flex-1 lg:overflow-hidden">
 
         {/* 좌측 패널 */}
-        <aside className="w-56 shrink-0 border-r border-slate-200 bg-white flex flex-col shadow-sm">
+        <aside className="w-full lg:w-56 lg:shrink-0 border-b lg:border-b-0 lg:border-r border-slate-200 bg-white flex flex-col shadow-sm max-h-[45vh] lg:max-h-none">
           <div className="p-3 border-b border-slate-100 space-y-2">
             <div className="grid grid-cols-2 gap-1 p-1 bg-slate-100 rounded-lg">
               {(["US", "KR"] as const).map((m) => (
