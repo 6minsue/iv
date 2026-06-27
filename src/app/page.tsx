@@ -1,17 +1,17 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, Fragment } from "react";
 import Header from "@/components/Header";
 import { useAppStore } from "@/store/useAppStore";
 import { extractArray } from "@/lib/parse";
 import { formatNumber, compactKRW } from "@/lib/utils";
 import {
   ResponsiveContainer, AreaChart, Area, ComposedChart, Line, PieChart, Pie, Cell,
-  XAxis, YAxis, Tooltip,
+  ScatterChart, Scatter, ZAxis, XAxis, YAxis, Tooltip,
 } from "recharts";
 import {
   Activity, ArrowRight, ShieldAlert, TrendingUp, TrendingDown, Dice5, PieChart as PieIcon, Radio, Wallet,
-  Cpu, Lightbulb, CheckCircle2,
+  Cpu, Lightbulb, CheckCircle2, Sigma, Scale,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -35,10 +35,18 @@ interface MC {
   band: { day: number; p5: number; p25: number; p50: number; p75: number; p95: number }[];
   finalP5: number; finalP50: number; finalP95: number; probLoss: number; expectedReturn: number;
 }
+interface MPTPortfolio { ret: number; vol: number; sharpe: number }
+interface MPT {
+  assets: { symbol: string; expReturn: number; volatility: number; currentWeight: number; maxSharpeWeight: number; minVolWeight: number }[];
+  correlation: number[][];
+  frontier: { ret: number; vol: number; sharpe: number }[];
+  current: MPTPortfolio; maxSharpe: MPTPortfolio; minVol: MPTPortfolio;
+}
 interface Analytics {
   currentValue: number; observations: number; history: { date: string; value: number }[];
   metrics: Metrics | null; monteCarlo: MC | null;
   allocation: { symbol: string; value: number; weight: number; currency: string }[];
+  mpt: MPT | null;
 }
 interface FeedItem { id: number; time: string; symbol: string; name: string; price: number; change: number; dir: 1 | -1 | 0; isUS: boolean; }
 interface AutoAI {
@@ -60,6 +68,11 @@ const ACT: Record<string, { c: string; bg: string; label: string }> = {
 };
 
 const UP = "#34d399", DOWN = "#f43f5e", ACCENT = "#a78bfa", BLUE = "#60a5fa";
+const sharpeColor = (s: number) => (s >= 1 ? "#34d399" : s >= 0.5 ? "#a78bfa" : s >= 0 ? "#60a5fa" : "#f43f5e");
+const corrColor = (c: number) => {
+  const a = Math.min(Math.abs(c), 1);
+  return c >= 0 ? `rgba(244,63,94,${0.12 + a * 0.55})` : `rgba(52,211,153,${0.12 + a * 0.55})`;
+};
 const PIE = ["#a78bfa", "#60a5fa", "#34d399", "#fbbf24", "#f43f5e", "#22d3ee", "#f472b6", "#818cf8"];
 const axis = { tick: { fill: "#5b6577", fontSize: 10 }, tickLine: false, axisLine: false } as const;
 const tip = { contentStyle: { background: "#131826", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, fontSize: 12, color: "#e6e9f0" }, labelStyle: { color: "#9aa4b8", fontSize: 11 } };
@@ -185,6 +198,8 @@ export default function DashboardPage() {
     return h.slice(-n).map((p) => ({ date: p.date.slice(5), value: p.value }));
   })();
   const mcData = mc?.band.map((b) => ({ day: b.day, p5: b.p5, p50: b.p50, p95: b.p95 })) ?? [];
+  const mptD = analytics?.mpt ?? null;
+  const frontierData = mptD?.frontier.map((f) => ({ x: f.vol * 100, y: f.ret * 100, sharpe: f.sharpe })) ?? [];
   const upDownCls = (v: number) => (v >= 0 ? "text-emerald-400" : "text-rose-400");
 
   return (
@@ -389,6 +404,91 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+
+        {/* 현대 포트폴리오 이론 (MPT) */}
+        {(mptD || (loadingAnalytics && holdings.length >= 2)) && (
+          <div className="panel overflow-hidden">
+            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[var(--border)]">
+              <Sigma className="w-4 h-4 text-violet-300" />
+              <h3 className="text-[11px] font-semibold tracking-wider uppercase text-white">현대 포트폴리오 이론 · 효율적 투자선</h3>
+              <span className="text-[10px] text-[var(--text-mute)]">Markowitz 평균-분산 · 4,000 시뮬</span>
+            </div>
+            {mptD ? (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 lg:divide-x divide-[var(--border)]">
+                {/* 효율적 투자선 */}
+                <div className="p-4">
+                  <ResponsiveContainer width="100%" height={240}>
+                    <ScatterChart margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
+                      <XAxis type="number" dataKey="x" name="변동성" unit="%" {...axis} tickFormatter={(v) => v.toFixed(0)} />
+                      <YAxis type="number" dataKey="y" name="기대수익" unit="%" {...axis} width={40} tickFormatter={(v) => v.toFixed(0)} />
+                      <ZAxis range={[16, 16]} />
+                      <Tooltip {...tip} cursor={{ strokeDasharray: "3 3", stroke: "rgba(255,255,255,0.2)" }}
+                        formatter={(v: unknown, n) => [typeof v === "number" ? `${v.toFixed(1)}%` : "-", n === "x" ? "변동성" : "기대수익"]} />
+                      <Scatter data={frontierData} isAnimationActive={false}>
+                        {frontierData.map((d, i) => <Cell key={i} fill={sharpeColor(d.sharpe)} fillOpacity={0.45} />)}
+                      </Scatter>
+                      <Scatter data={[{ x: mptD.current.vol * 100, y: mptD.current.ret * 100 }]} fill="#ffffff" shape="diamond" isAnimationActive={false} />
+                      <Scatter data={[{ x: mptD.maxSharpe.vol * 100, y: mptD.maxSharpe.ret * 100 }]} fill={ACCENT} isAnimationActive={false} />
+                      <Scatter data={[{ x: mptD.minVol.vol * 100, y: mptD.minVol.ret * 100 }]} fill={BLUE} isAnimationActive={false} />
+                    </ScatterChart>
+                  </ResponsiveContainer>
+                  <div className="flex gap-3 text-[10px] text-[var(--text-mute)] justify-center mt-1">
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rotate-45 bg-white inline-block" />현재</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full inline-block" style={{ background: ACCENT }} />최대샤프(최적)</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full inline-block" style={{ background: BLUE }} />최소변동</span>
+                  </div>
+                </div>
+
+                {/* 리밸런싱 + 상관 */}
+                <div className="p-4 space-y-3">
+                  <div className="panel-2 px-3 py-2 flex items-start gap-2">
+                    <Scale className="w-3.5 h-3.5 text-emerald-400 mt-0.5 shrink-0" />
+                    <p className="text-[11px] text-[var(--text-dim)] leading-snug">
+                      최적(최대샤프) 배분 시 <span className="text-white">샤프 {mptD.current.sharpe.toFixed(2)}→{mptD.maxSharpe.sharpe.toFixed(2)}</span>,
+                      변동성 {(mptD.current.vol * 100).toFixed(1)}%→<span className="text-emerald-400">{(mptD.maxSharpe.vol * 100).toFixed(1)}%</span>,
+                      기대수익 {(mptD.current.ret * 100).toFixed(1)}%→{(mptD.maxSharpe.ret * 100).toFixed(1)}%
+                    </p>
+                  </div>
+                  <div className="space-y-1.5">
+                    {mptD.assets.map((a) => {
+                      const diff = a.maxSharpeWeight - a.currentWeight;
+                      return (
+                        <div key={a.symbol} className="text-[11px]">
+                          <div className="flex justify-between mb-0.5">
+                            <span className="text-[var(--text-dim)] font-mono">{a.symbol}</span>
+                            <span className="text-[var(--text-mute)]">현재 {(a.currentWeight * 100).toFixed(0)}% → 최적 <span className="text-violet-300">{(a.maxSharpeWeight * 100).toFixed(0)}%</span> {Math.abs(diff) > 0.02 ? <span className={diff > 0 ? "text-emerald-400" : "text-rose-400"}>{diff > 0 ? "↑늘리기" : "↓줄이기"}</span> : <span className="text-[var(--text-mute)]">유지</span>}</span>
+                          </div>
+                          <div className="h-1.5 bg-white/[0.06] rounded relative overflow-hidden">
+                            <div className="h-full bg-slate-500 rounded" style={{ width: `${Math.min(a.currentWeight * 100, 100)}%` }} />
+                            <div className="absolute top-0 h-full w-0.5 bg-violet-400" style={{ left: `${Math.min(a.maxSharpeWeight * 100, 100)}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {/* 상관관계 히트맵 */}
+                  <div>
+                    <p className="text-[10px] text-[var(--text-mute)] mb-1">상관관계 (낮을수록 분산효과 ↑)</p>
+                    <div className="inline-grid gap-0.5 text-[9px]" style={{ gridTemplateColumns: `auto repeat(${mptD.assets.length}, minmax(28px, 1fr))` }}>
+                      <span />
+                      {mptD.assets.map((a) => <span key={a.symbol} className="text-[var(--text-mute)] text-center truncate">{a.symbol.slice(0, 4)}</span>)}
+                      {mptD.correlation.map((row, i) => (
+                        <Fragment key={i}>
+                          <span className="text-[var(--text-mute)] pr-1 self-center truncate">{mptD.assets[i].symbol.slice(0, 4)}</span>
+                          {row.map((c, j) => (
+                            <span key={`${i}-${j}`} className="text-center py-1 rounded tabular-nums text-white/80" style={{ background: corrColor(c) }}>{c.toFixed(1)}</span>
+                          ))}
+                        </Fragment>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="p-8 text-center text-[var(--text-mute)] text-xs animate-pulse">{loadingAnalytics ? "효율적 투자선 4,000회 시뮬레이션 중…" : "데이터 없음"}</div>
+            )}
+          </div>
+        )}
 
         {/* AI 종합 인텔리전스 (백엔드 9-모델) */}
         <div className="panel overflow-hidden">

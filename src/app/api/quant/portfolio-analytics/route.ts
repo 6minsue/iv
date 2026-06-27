@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchCandlesServer } from "@/lib/server/candles";
-import { computeRisk, monteCarlo } from "@/lib/quant/risk";
+import { computeRisk, monteCarlo, dailyReturns } from "@/lib/quant/risk";
+import { computeMPT } from "@/lib/quant/mpt";
 import axios from "axios";
 
 interface HoldingIn {
@@ -50,6 +51,8 @@ export async function POST(req: NextRequest) {
     const fx = (h: HoldingIn) => (h.currency === "USD" ? exchangeRate : 1);
     const lastClose = new Map<string, number>();
     const history: { date: string; value: number }[] = [];
+    // 자산별 종가 시계열 (MPT 상관/공분산용, history와 동일 정렬)
+    const assetCloses = new Map<string, number[]>(series.map((s) => [s.h.symbol, []]));
 
     for (const date of allDates) {
       for (const s of series) {
@@ -64,7 +67,10 @@ export async function POST(req: NextRequest) {
         if (c == null) { complete = false; break; }
         value += s.h.quantity * c * fx(s.h);
       }
-      if (complete) history.push({ date, value });
+      if (complete) {
+        history.push({ date, value });
+        for (const s of series) assetCloses.get(s.h.symbol)!.push(lastClose.get(s.h.symbol) as number);
+      }
     }
 
     if (history.length < 10) return NextResponse.json({ error: "분석에 필요한 히스토리가 부족합니다" }, { status: 200 });
@@ -83,6 +89,15 @@ export async function POST(req: NextRequest) {
       })
       .sort((a, b) => b.value - a.value);
 
+    // 현대 포트폴리오 이론 (효율적 투자선 + 최적배분 + 상관관계)
+    const symbols = series.map((s) => s.h.symbol);
+    const retMatrix = symbols.map((sym) => dailyReturns(assetCloses.get(sym) ?? []));
+    const currentWeights = series.map((s) => {
+      const last = s.closeByDate.get(s.dates[s.dates.length - 1]) ?? 0;
+      return currentValue > 0 ? (s.h.quantity * last * fx(s.h)) / currentValue : 0;
+    });
+    const mpt = symbols.length >= 2 ? computeMPT(symbols, retMatrix, currentWeights, 4000) : null;
+
     return NextResponse.json({
       currentValue,
       observations: history.length,
@@ -90,6 +105,7 @@ export async function POST(req: NextRequest) {
       metrics,
       monteCarlo: mc,
       allocation,
+      mpt,
     });
   } catch (e: unknown) {
     if (axios.isAxiosError(e)) {
