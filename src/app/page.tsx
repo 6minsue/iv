@@ -2,49 +2,61 @@
 
 import { useEffect, useRef, useState } from "react";
 import Header from "@/components/Header";
-import PriceCard from "@/components/PriceCard";
 import { useAppStore } from "@/store/useAppStore";
 import { extractArray } from "@/lib/parse";
-import { formatNumber } from "@/lib/utils";
-import { TrendingUp, TrendingDown, Activity, Wallet, Briefcase, ArrowUp, ArrowDown, Atom, ArrowRight } from "lucide-react";
+import { formatNumber, compactKRW } from "@/lib/utils";
+import {
+  ResponsiveContainer, AreaChart, Area, ComposedChart, Line, PieChart, Pie, Cell,
+  XAxis, YAxis, Tooltip,
+} from "recharts";
+import {
+  Activity, ArrowRight, ShieldAlert, TrendingUp, TrendingDown, Dice5, PieChart as PieIcon, Radio, Wallet,
+} from "lucide-react";
 import Link from "next/link";
 
-interface PriceData {
-  symbol: string;
-  symbolName: string;
-  currentPrice: number;
-  changePrice: number;
-  changeRate: number;
-  volume: number;
-}
-
+interface PriceData { symbol: string; symbolName: string; currentPrice: number; changePrice: number; changeRate: number; volume: number; }
 interface HoldingRow {
-  symbol: string;
-  symbolName: string;
-  currency: string;
-  quantity: number;
-  lastPrice: number;
-  averagePrice: number;
-  marketValueNative: number;
-  marketValueKRW: number;
-  profitLossNative: number;
-  profitLossKRW: number;
-  profitLossRate: number;
-  exchangeRate: number;
+  symbol: string; symbolName: string; currency: string; quantity: number; lastPrice: number; averagePrice: number;
+  marketValueNative: number; marketValueKRW: number; profitLossNative: number; profitLossKRW: number; profitLossRate: number;
 }
-
 interface Summary {
-  exchangeRate: number;
-  krwMarketValue: number;
-  usdMarketValue: number;
-  usdMarketValueKRW: number;
-  totalMarketValueKRW: number;
-  totalPurchaseKRW: number;
-  totalPnlKRW: number;
-  totalPnlRate: number;
-  usdDailyPnlKRW: number;
-  krwDailyPnl: number;
-  dailyPnlRate: number;
+  exchangeRate: number; krwMarketValue: number; usdMarketValue: number; usdMarketValueKRW: number;
+  totalMarketValueKRW: number; totalPurchaseKRW: number; totalPnlKRW: number; totalPnlRate: number;
+  usdDailyPnlKRW: number; krwDailyPnl: number; dailyPnlRate: number;
+}
+interface Metrics {
+  totalReturn: number; annualReturn: number; annualVolatility: number; sharpe: number; sortino: number;
+  maxDrawdown: number; calmar: number; var95Hist: number; var99Hist: number; var95Param: number; cvar95: number;
+  downsideDeviation: number; bestDay: number; worstDay: number; positiveDayRatio: number; skewness: number; kurtosis: number; observations: number;
+}
+interface MC {
+  days: number; sims: number; start: number;
+  band: { day: number; p5: number; p25: number; p50: number; p75: number; p95: number }[];
+  finalP5: number; finalP50: number; finalP95: number; probLoss: number; expectedReturn: number;
+}
+interface Analytics {
+  currentValue: number; observations: number; history: { date: string; value: number }[];
+  metrics: Metrics | null; monteCarlo: MC | null;
+  allocation: { symbol: string; value: number; weight: number; currency: string }[];
+}
+interface FeedItem { id: number; time: string; symbol: string; name: string; price: number; change: number; dir: 1 | -1 | 0; isUS: boolean; }
+
+const UP = "#34d399", DOWN = "#f43f5e", ACCENT = "#a78bfa", BLUE = "#60a5fa";
+const PIE = ["#a78bfa", "#60a5fa", "#34d399", "#fbbf24", "#f43f5e", "#22d3ee", "#f472b6", "#818cf8"];
+const axis = { tick: { fill: "#5b6577", fontSize: 10 }, tickLine: false, axisLine: false } as const;
+const tip = { contentStyle: { background: "#131826", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, fontSize: 12, color: "#e6e9f0" }, labelStyle: { color: "#9aa4b8", fontSize: 11 } };
+
+function TabHead({ tabs, active, onSelect }: { tabs: string[]; active: number; onSelect?: (i: number) => void }) {
+  return (
+    <div className="flex border-b border-[var(--border)]">
+      {tabs.map((t, i) => (
+        <button key={t} onClick={() => onSelect?.(i)}
+          className={`px-4 py-2.5 text-[11px] font-semibold tracking-wider uppercase transition-colors ${i === active ? "text-white border-b-2 border-violet-400 -mb-px" : "text-[var(--text-mute)] hover:text-[var(--text-dim)]"}`}>
+          {t}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 export default function DashboardPage() {
@@ -52,244 +64,319 @@ export default function DashboardPage() {
   const [prices, setPrices] = useState<PriceData[]>([]);
   const [holdings, setHoldings] = useState<HoldingRow[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
-  const [loadingPrices, setLoadingPrices] = useState(true);
-  const [loadingHoldings, setLoadingHoldings] = useState(false);
-  const pollingRef = useRef<number | null>(null);
+  const [analytics, setAnalytics] = useState<Analytics | null>(null);
+  const [loadingAnalytics, setLoadingAnalytics] = useState(false);
+  const [range, setRange] = useState<"1M" | "3M" | "ALL">("ALL");
+  const [feed, setFeed] = useState<FeedItem[]>([]);
+  const [portTab, setPortTab] = useState(0);
+  const pollRef = useRef<number | null>(null);
+  const feedId = useRef(0);
 
+  // 관심종목 시세 + 실시간 피드
   useEffect(() => {
     if (watchlist.length === 0) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLoadingPrices(true);
     fetch(`/api/prices?symbols=${watchlist.join(",")}`)
       .then((r) => r.json())
       .then((d) => setPrices(extractArray<PriceData>(d, "prices", "data", "items")))
-      .catch(() => setPrices([]))
-      .finally(() => setLoadingPrices(false));
+      .catch(() => {});
   }, [watchlist]);
 
-  // 실시간 가격 업데이트 (백그라운드, 15초)
   useEffect(() => {
     if (watchlist.length === 0) return;
-    if (pollingRef.current) window.clearInterval(pollingRef.current);
-    pollingRef.current = window.setInterval(() => {
+    if (pollRef.current) window.clearInterval(pollRef.current);
+    pollRef.current = window.setInterval(() => {
       fetch(`/api/prices?symbols=${watchlist.join(",")}&fast=1`)
         .then((r) => (r.ok ? r.json() : null))
         .then((d: { prices?: Array<{ symbol: string; currentPrice: number }> } | null) => {
           if (!d) return;
           const list = extractArray<{ symbol: string; currentPrice: number }>(d, "prices");
-          if (list.length === 0) return;
-          const map = Object.fromEntries(list.map((p) => [p.symbol, p.currentPrice]));
-          setPrices((prev) => prev.map((p) => (map[p.symbol] !== undefined ? { ...p, currentPrice: map[p.symbol] } : p)));
+          if (!list.length) return;
+          setPrices((prev) => {
+            const newFeed: FeedItem[] = [];
+            const next = prev.map((p) => {
+              const m = list.find((x) => x.symbol === p.symbol);
+              if (m && m.currentPrice !== p.currentPrice) {
+                const dir: 1 | -1 | 0 = m.currentPrice > p.currentPrice ? 1 : m.currentPrice < p.currentPrice ? -1 : 0;
+                newFeed.push({ id: feedId.current++, time: "방금", symbol: p.symbol, name: p.symbolName ?? p.symbol, price: m.currentPrice, change: m.currentPrice - p.currentPrice, dir, isUS: !/^\d{6}$/.test(p.symbol) });
+                return { ...p, currentPrice: m.currentPrice };
+              }
+              return p;
+            });
+            if (newFeed.length) setFeed((f) => [...newFeed, ...f].slice(0, 18));
+            return next;
+          });
         })
         .catch(() => {});
-    }, 15000);
-    return () => { if (pollingRef.current) window.clearInterval(pollingRef.current); };
+    }, 3000);
+    return () => { if (pollRef.current) window.clearInterval(pollRef.current); };
   }, [watchlist]);
 
+  // 보유 종목
   useEffect(() => {
     if (!selectedAccount) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLoadingHoldings(true);
     fetch(`/api/holdings?accountSeq=${selectedAccount.accountSeq}`)
       .then((r) => r.json())
-      .then((d) => {
-        setHoldings(d.holdings ?? []);
-        setSummary(d.summary ?? null);
-      })
-      .catch(() => { setHoldings([]); setSummary(null); })
-      .finally(() => setLoadingHoldings(false));
+      .then((d) => { setHoldings(d.holdings ?? []); setSummary(d.summary ?? null); })
+      .catch(() => { setHoldings([]); setSummary(null); });
   }, [selectedAccount]);
 
-  const winners = prices.filter((p) => (p.changePrice ?? 0) > 0).length;
-  const losers = prices.filter((p) => (p.changePrice ?? 0) < 0).length;
+  // 포트폴리오 분석 (백엔드: 가치히스토리 + 리스크 + 몬테카를로)
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (holdings.length === 0 || !summary) { setAnalytics(null); return; }
+    setLoadingAnalytics(true);
+    fetch("/api/quant/portfolio-analytics", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        holdings: holdings.map((h) => ({ symbol: h.symbol, quantity: h.quantity, currency: h.currency })),
+        exchangeRate: summary.exchangeRate,
+      }),
+    })
+      .then((r) => r.json())
+      .then((d) => setAnalytics(d.error ? null : d))
+      .catch(() => setAnalytics(null))
+      .finally(() => setLoadingAnalytics(false));
+  }, [holdings, summary]);
 
   const totalKRW = summary?.totalMarketValueKRW ?? 0;
   const totalPnl = summary?.totalPnlKRW ?? 0;
-  const totalPnlRate = summary?.totalPnlRate ?? 0;
   const dailyPnl = (summary?.usdDailyPnlKRW ?? 0) + (summary?.krwDailyPnl ?? 0);
+  const m = analytics?.metrics ?? null;
+  const mc = analytics?.monteCarlo ?? null;
+
+  const histData = (() => {
+    const h = analytics?.history ?? [];
+    const n = range === "1M" ? 22 : range === "3M" ? 66 : h.length;
+    return h.slice(-n).map((p) => ({ date: p.date.slice(5), value: p.value }));
+  })();
+  const mcData = mc?.band.map((b) => ({ day: b.day, p5: b.p5, p50: b.p50, p95: b.p95 })) ?? [];
+  const upDownCls = (v: number) => (v >= 0 ? "text-emerald-400" : "text-rose-400");
 
   return (
     <div className="min-h-screen">
       <Header title="대시보드" />
-      <div className="p-6 space-y-7 max-w-7xl mx-auto w-full">
+      <div className="p-5 space-y-4 max-w-[1600px] mx-auto w-full">
 
-        {/* 리서치 랩 배너 */}
-        <Link href="/lab" className="block panel p-4 relative overflow-hidden group hover:border-violet-400/40 transition-colors">
-          <div className="absolute -top-12 -right-8 w-52 h-52 rounded-full bg-violet-500/10 blur-3xl" />
-          <div className="flex items-center justify-between relative">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-blue-500 flex items-center justify-center glow">
-                <Atom className="w-5 h-5 text-white" />
+        {/* 엔티티 헤더 */}
+        <div className="panel p-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500 to-blue-500 flex items-center justify-center"><Wallet className="w-4 h-4 text-white" /></div>
+                <h2 className="text-base font-bold text-white">{selectedAccount?.accountName ?? "내 포트폴리오"}</h2>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.06] text-[var(--text-mute)]">{holdings.length} ASSETS</span>
               </div>
-              <div>
-                <p className="text-sm font-semibold text-white">리서치 랩 — 매수·매도·수량 추천 + 백테스트</p>
-                <p className="text-xs text-[var(--text-dim)]">워크포워드 · 강화학습 · 과적합검증(PBO/DSR) · 포트폴리오</p>
+              <div className="flex items-baseline gap-3">
+                <span className="text-3xl font-bold tabular-nums text-white">{totalKRW > 0 ? `₩${formatNumber(Math.round(totalKRW))}` : "—"}</span>
+                <span className={`text-sm font-semibold tabular-nums ${upDownCls(dailyPnl)}`}>{dailyPnl >= 0 ? "+" : ""}{formatNumber(Math.round(dailyPnl))} ({summary ? (summary.dailyPnlRate >= 0 ? "+" : "") + summary.dailyPnlRate.toFixed(2) : "0.00"}%)</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                {["국내·해외 통합", `환율 ₩${summary ? formatNumber(summary.exchangeRate, 1) : "-"}`, `누적손익 ${totalPnl >= 0 ? "+" : ""}${compactKRW(totalPnl)}`].map((t) => (
+                  <span key={t} className="text-[10px] px-2 py-0.5 rounded bg-white/[0.04] text-[var(--text-dim)] border border-[var(--border)]">{t}</span>
+                ))}
               </div>
             </div>
-            <ArrowRight className="w-5 h-5 text-[var(--text-mute)] group-hover:text-violet-300 group-hover:translate-x-0.5 transition-all" />
+            <Link href="/lab" className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-violet-600 to-blue-600 text-white text-sm font-semibold glow">
+              AI 리서치 랩 <ArrowRight className="w-4 h-4" />
+            </Link>
           </div>
-        </Link>
+        </div>
 
-        {/* 요약 카드 */}
-        <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="panel p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="p-2 rounded-lg bg-violet-500/10"><Wallet className="w-4 h-4 text-violet-300" /></div>
-              <span className="text-xs text-[var(--text-dim)] font-medium">총 평가금액</span>
-            </div>
-            <p className="text-xl font-bold tabular-nums text-violet-300">
-              {totalKRW > 0 ? `${formatNumber(Math.round(totalKRW))}원` : loadingHoldings ? "로딩중…" : "—"}
-            </p>
-            <p className="text-xs text-[var(--text-mute)] mt-1">
-              {summary ? `환율 ₩${formatNumber(summary.exchangeRate, 1)}` : selectedAccount?.accountName ?? "계좌 없음"}
-            </p>
-          </div>
-
-          <div className={`panel p-4 ${totalPnl >= 0 ? "border-rose-500/20" : "border-blue-500/20"}`}>
-            <div className="flex items-center gap-2 mb-3">
-              <div className={`p-2 rounded-lg ${totalPnl >= 0 ? "bg-rose-500/10" : "bg-blue-500/10"}`}>
-                {totalPnl >= 0 ? <TrendingUp className="w-4 h-4 text-rose-400" /> : <TrendingDown className="w-4 h-4 text-blue-400" />}
-              </div>
-              <span className="text-xs text-[var(--text-dim)] font-medium">누적 손익</span>
-            </div>
-            <p className={`text-xl font-bold tabular-nums ${totalPnl >= 0 ? "text-rose-400" : "text-blue-400"}`}>
-              {totalKRW > 0 ? `${totalPnl >= 0 ? "+" : ""}${formatNumber(Math.round(totalPnl))}원` : "—"}
-            </p>
-            <p className="text-xs text-[var(--text-mute)] mt-1">
-              {totalPnlRate !== 0 ? `${totalPnlRate >= 0 ? "+" : ""}${totalPnlRate.toFixed(2)}%` : "—"}
-            </p>
-          </div>
-
-          <div className={`panel p-4 ${dailyPnl >= 0 ? "border-orange-500/20" : "border-indigo-500/20"}`}>
-            <div className="flex items-center gap-2 mb-3">
-              <div className={`p-2 rounded-lg ${dailyPnl >= 0 ? "bg-orange-500/10" : "bg-indigo-500/10"}`}>
-                {dailyPnl >= 0 ? <ArrowUp className="w-4 h-4 text-orange-400" /> : <ArrowDown className="w-4 h-4 text-indigo-400" />}
-              </div>
-              <span className="text-xs text-[var(--text-dim)] font-medium">일 손익</span>
-            </div>
-            <p className={`text-xl font-bold tabular-nums ${dailyPnl >= 0 ? "text-orange-400" : "text-indigo-400"}`}>
-              {totalKRW > 0 ? `${dailyPnl >= 0 ? "+" : ""}${formatNumber(Math.round(dailyPnl))}원` : "—"}
-            </p>
-            <p className="text-xs text-[var(--text-mute)] mt-1">
-              {summary && summary.dailyPnlRate !== 0 ? `${summary.dailyPnlRate >= 0 ? "+" : ""}${summary.dailyPnlRate.toFixed(2)}%` : "—"}
-            </p>
-          </div>
-
-          <div className="panel p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="p-2 rounded-lg bg-white/[0.06]"><Activity className="w-4 h-4 text-[var(--text-dim)]" /></div>
-              <span className="text-xs text-[var(--text-dim)] font-medium">주요 종목</span>
-            </div>
-            <p className="text-xl font-bold tabular-nums text-slate-200">
-              {prices.length > 0 ? `${winners}↑ / ${losers}↓` : "—"}
-            </p>
-            <p className="text-xs text-[var(--text-mute)] mt-1">전체 {prices.length}종목</p>
-          </div>
-        </section>
-
-        {/* 미국/한국주식 분리 요약 */}
-        {summary && (summary.usdMarketValue > 0 || summary.krwMarketValue > 0) && (
-          <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {summary.usdMarketValue > 0 && (
-              <div className="panel p-4 border-blue-500/20">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-semibold text-blue-300 bg-blue-500/10 px-2 py-0.5 rounded-full">🇺🇸 미국주식 (USD)</span>
-                  <span className="text-xs text-[var(--text-mute)]">₩{formatNumber(summary.exchangeRate, 1)} 적용</span>
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          {/* ── 왼쪽 컬럼 ── */}
+          <div className="space-y-4">
+            {/* 포트폴리오 / 배분 */}
+            <div className="panel overflow-hidden">
+              <TabHead tabs={["포트폴리오", "자산 배분"]} active={portTab} onSelect={setPortTab} />
+              {portTab === 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm min-w-[560px]">
+                    <thead>
+                      <tr className="text-[10px] text-[var(--text-mute)] uppercase tracking-wider">
+                        {["자산", "현재가", "보유수량", "평가액", "손익"].map((h) => <th key={h} className="px-4 py-2 text-left font-medium first:text-left">{h}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {holdings.length === 0 ? (
+                        <tr><td colSpan={5} className="px-4 py-8 text-center text-[var(--text-mute)] text-xs">{selectedAccount ? "보유 종목 없음" : "계좌를 선택하세요"}</td></tr>
+                      ) : holdings.map((h) => {
+                        const isUS = h.currency === "USD";
+                        const fmtN = (v: number) => isUS ? `$${formatNumber(v, 2)}` : `₩${formatNumber(v, 0)}`;
+                        return (
+                          <tr key={h.symbol} className="border-t border-[var(--border)] hover:bg-white/[0.02]">
+                            <td className="px-4 py-2.5">
+                              <Link href={`/market?symbol=${h.symbol}`} className="block">
+                                <p className="text-white font-medium text-xs leading-tight">{h.symbolName}</p>
+                                <p className="text-[10px] text-[var(--text-mute)] font-mono">{h.symbol}{isUS && " · USD"}</p>
+                              </Link>
+                            </td>
+                            <td className="px-4 py-2.5 tabular-nums text-[var(--text-dim)] text-xs">{fmtN(h.lastPrice)}</td>
+                            <td className="px-4 py-2.5 tabular-nums text-[var(--text-dim)] text-xs">{isUS ? formatNumber(h.quantity, 4) : formatNumber(h.quantity, 0)}</td>
+                            <td className="px-4 py-2.5 tabular-nums text-white text-xs">₩{formatNumber(Math.round(h.marketValueKRW))}</td>
+                            <td className={`px-4 py-2.5 tabular-nums text-xs font-semibold ${upDownCls(h.profitLossRate)}`}>
+                              {h.profitLossRate >= 0 ? "+" : ""}{h.profitLossRate.toFixed(2)}%
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
-                <p className="text-2xl font-bold tabular-nums text-white">${formatNumber(summary.usdMarketValue, 2)}</p>
-                <p className="text-sm text-[var(--text-dim)] mt-0.5">≈ {formatNumber(Math.round(summary.usdMarketValueKRW))}원</p>
-              </div>
-            )}
-            {summary.krwMarketValue > 0 && (
-              <div className="panel p-4 border-rose-500/20">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-semibold text-rose-300 bg-rose-500/10 px-2 py-0.5 rounded-full">🇰🇷 국내주식 (KRW)</span>
-                </div>
-                <p className="text-2xl font-bold tabular-nums text-white">{formatNumber(summary.krwMarketValue)}원</p>
-              </div>
-            )}
-          </section>
-        )}
-
-        {/* 관심종목 시세 */}
-        <section>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <Activity className="w-4 h-4 text-[var(--text-mute)]" />
-              <h2 className="text-sm font-semibold text-slate-200">주요 종목</h2>
-              <span className="text-xs text-[var(--text-mute)] bg-white/[0.06] px-2 py-0.5 rounded-full">국내</span>
-            </div>
-            <Link href="/market" className="text-xs text-violet-300 hover:text-violet-200 transition-colors font-medium">시장 보기 →</Link>
-          </div>
-
-          {loadingPrices ? (
-            <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-3">
-              {watchlist.map((s) => <div key={s} className="h-32 panel animate-pulse" />)}
-            </div>
-          ) : prices.length === 0 ? (
-            <div className="panel p-8 text-center text-[var(--text-mute)] text-sm">API 응답 없음 — 설정에서 연결을 확인해 주세요</div>
-          ) : (
-            <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-3">
-              {prices.map((p) => (
-                <Link key={p.symbol} href={`/market?symbol=${p.symbol}`}>
-                  <PriceCard symbol={p.symbol} name={p.symbolName ?? p.symbol} price={p.currentPrice ?? 0}
-                    change={p.changePrice ?? 0} changeRate={p.changeRate ?? 0} volume={p.volume} />
-                </Link>
-              ))}
-            </div>
-          )}
-        </section>
-
-        {/* 보유 종목 */}
-        <section>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <Briefcase className="w-4 h-4 text-[var(--text-mute)]" />
-              <h2 className="text-sm font-semibold text-slate-200">보유 종목</h2>
-              {holdings.length > 0 && <span className="text-xs text-[var(--text-mute)] bg-white/[0.06] px-2 py-0.5 rounded-full">{holdings.length}종목</span>}
-            </div>
-            {holdings.length > 0 && <Link href="/portfolio" className="text-xs text-violet-300 hover:text-violet-200 font-medium">상세 보기 →</Link>}
-          </div>
-
-          {!selectedAccount ? (
-            <div className="panel p-8 text-center text-[var(--text-mute)] text-sm">상단에서 계좌를 선택하면 보유 종목이 표시됩니다</div>
-          ) : loadingHoldings ? (
-            <div className="panel p-8 text-center text-[var(--text-mute)] text-sm animate-pulse">보유 종목 불러오는 중…</div>
-          ) : holdings.length === 0 ? (
-            <div className="panel p-8 text-center text-[var(--text-mute)] text-sm">보유 종목이 없습니다</div>
-          ) : (
-            <div className="panel overflow-x-auto">
-              <table className="w-full text-sm min-w-[640px]">
-                <thead>
-                  <tr className="border-b border-[var(--border)] bg-white/[0.03]">
-                    {["종목", "수량", "평균단가", "현재가", "평가금액(KRW)", "손익", "수익률"].map((h) => (
-                      <th key={h} className="px-4 py-3 text-xs text-[var(--text-dim)] text-left font-semibold">{h}</th>
+              ) : (
+                <div className="p-4 flex flex-col lg:flex-row items-center gap-4">
+                  <ResponsiveContainer width="100%" height={200}>
+                    <PieChart>
+                      <Pie data={(analytics?.allocation ?? []).map((a) => ({ name: a.symbol, value: a.value, weight: a.weight }))}
+                        cx="50%" cy="50%" innerRadius={50} outerRadius={82} paddingAngle={2} dataKey="value">
+                        {(analytics?.allocation ?? []).map((_, i) => <Cell key={i} fill={PIE[i % PIE.length]} />)}
+                      </Pie>
+                      <Tooltip {...tip} formatter={(v: unknown, _n, p: { payload?: { weight?: number } }) => [typeof v === "number" ? `₩${formatNumber(Math.round(v))} (${((p?.payload?.weight ?? 0) * 100).toFixed(1)}%)` : "-", "평가액"]} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="w-full lg:w-56 space-y-1.5">
+                    {(analytics?.allocation ?? []).slice(0, 8).map((a, i) => (
+                      <div key={a.symbol} className="flex items-center justify-between text-xs">
+                        <span className="flex items-center gap-1.5 text-[var(--text-dim)]"><span className="w-2 h-2 rounded-full" style={{ background: PIE[i % PIE.length] }} />{a.symbol}</span>
+                        <span className="tabular-nums text-white">{(a.weight * 100).toFixed(1)}%</span>
+                      </div>
                     ))}
-                  </tr>
-                </thead>
+                    {!analytics && <p className="text-xs text-[var(--text-mute)]">{loadingAnalytics ? "분석 중…" : "데이터 없음"}</p>}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 리스크 분석 (과학적 방법론) */}
+            <div className="panel overflow-hidden">
+              <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[var(--border)]">
+                <ShieldAlert className="w-4 h-4 text-violet-300" />
+                <h3 className="text-[11px] font-semibold tracking-wider uppercase text-white">리스크 분석</h3>
+                <span className="text-[10px] text-[var(--text-mute)]">VaR · CVaR · Sharpe · {m ? `${m.observations}일` : "—"}</span>
+              </div>
+              {loadingAnalytics && !m ? (
+                <div className="p-8 text-center text-[var(--text-mute)] text-xs animate-pulse">리스크 분석 계산 중… (백엔드에서 가격 히스토리 수집)</div>
+              ) : m ? (
+                <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-y divide-[var(--border)]">
+                  {[
+                    { l: "VaR 95% (1일)", v: `${(m.var95Hist * 100).toFixed(2)}%`, s: `₩${compactKRW(m.var95Hist * (analytics?.currentValue ?? 0))}`, tone: "down" },
+                    { l: "VaR 99% (1일)", v: `${(m.var99Hist * 100).toFixed(2)}%`, s: `₩${compactKRW(m.var99Hist * (analytics?.currentValue ?? 0))}`, tone: "down" },
+                    { l: "CVaR 95%", v: `${(m.cvar95 * 100).toFixed(2)}%`, s: "기대 손실(꼬리)", tone: "down" },
+                    { l: "연 변동성", v: `${(m.annualVolatility * 100).toFixed(1)}%`, s: "표준편차(연율)" },
+                    { l: "Sharpe", v: m.sharpe.toFixed(2), s: "위험조정수익", tone: m.sharpe >= 1 ? "up" : "" },
+                    { l: "Sortino", v: m.sortino.toFixed(2), s: "하방위험조정", tone: m.sortino >= 1 ? "up" : "" },
+                    { l: "최대낙폭", v: `${(m.maxDrawdown * 100).toFixed(1)}%`, s: `Calmar ${m.calmar.toFixed(2)}`, tone: "down" },
+                    { l: "양봉 비율", v: `${(m.positiveDayRatio * 100).toFixed(0)}%`, s: `왜도 ${m.skewness.toFixed(2)}` },
+                  ].map((c) => (
+                    <div key={c.l} className="px-4 py-3">
+                      <p className="text-[10px] text-[var(--text-mute)] mb-1">{c.l}</p>
+                      <p className={`text-base font-bold tabular-nums ${c.tone === "down" ? "text-rose-400" : c.tone === "up" ? "text-emerald-400" : "text-white"}`}>{c.v}</p>
+                      <p className="text-[10px] text-[var(--text-mute)] mt-0.5">{c.s}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-8 text-center text-[var(--text-mute)] text-xs">보유 종목이 있으면 VaR·Sharpe 등 리스크 지표를 계산합니다</div>
+              )}
+            </div>
+          </div>
+
+          {/* ── 오른쪽 컬럼 ── */}
+          <div className="space-y-4">
+            {/* 포트폴리오 가치 추이 */}
+            <div className="panel overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-2.5 border-b border-[var(--border)]">
+                <div className="flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-violet-300" />
+                  <h3 className="text-[11px] font-semibold tracking-wider uppercase text-white">포트폴리오 가치 추이</h3>
+                </div>
+                <div className="flex gap-1">
+                  {(["1M", "3M", "ALL"] as const).map((r) => (
+                    <button key={r} onClick={() => setRange(r)} className={`px-2 py-0.5 text-[10px] rounded ${range === r ? "bg-white/[0.1] text-white" : "text-[var(--text-mute)]"}`}>{r}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="p-4">
+                {histData.length > 1 ? (
+                  <ResponsiveContainer width="100%" height={230}>
+                    <AreaChart data={histData}>
+                      <defs><linearGradient id="bal" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={ACCENT} stopOpacity={0.4} /><stop offset="100%" stopColor={ACCENT} stopOpacity={0} /></linearGradient></defs>
+                      <XAxis dataKey="date" {...axis} minTickGap={50} />
+                      <YAxis {...axis} width={52} domain={["auto", "auto"]} tickFormatter={(v) => `₩${compactKRW(v)}`} />
+                      <Tooltip {...tip} formatter={(v: unknown) => [typeof v === "number" ? `₩${formatNumber(Math.round(v))}` : "-", "평가액"]} />
+                      <Area dataKey="value" stroke={ACCENT} strokeWidth={2} fill="url(#bal)" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-[230px] flex items-center justify-center text-[var(--text-mute)] text-xs animate-pulse">{loadingAnalytics ? "가격 히스토리 수집 중…" : "데이터 없음"}</div>
+                )}
+              </div>
+            </div>
+
+            {/* 몬테카를로 시뮬레이션 */}
+            <div className="panel overflow-hidden">
+              <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[var(--border)]">
+                <Dice5 className="w-4 h-4 text-violet-300" />
+                <h3 className="text-[11px] font-semibold tracking-wider uppercase text-white">몬테카를로 시뮬레이션</h3>
+                <span className="text-[10px] text-[var(--text-mute)]">{mc ? `${mc.sims.toLocaleString()}회 · ${mc.days}일 전망` : "—"}</span>
+              </div>
+              {mc ? (
+                <div className="p-4">
+                  <div className="grid grid-cols-3 gap-2 mb-3">
+                    {[
+                      { l: "비관 (5%)", v: `₩${compactKRW(mc.finalP5)}`, c: "text-rose-400" },
+                      { l: "기대 (중앙)", v: `${mc.expectedReturn >= 0 ? "+" : ""}${(mc.expectedReturn * 100).toFixed(1)}%`, c: "text-white" },
+                      { l: "낙관 (95%)", v: `₩${compactKRW(mc.finalP95)}`, c: "text-emerald-400" },
+                    ].map((x) => (
+                      <div key={x.l} className="panel-2 px-3 py-2">
+                        <p className="text-[10px] text-[var(--text-mute)]">{x.l}</p>
+                        <p className={`text-sm font-bold tabular-nums ${x.c}`}>{x.v}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <ResponsiveContainer width="100%" height={170}>
+                    <ComposedChart data={mcData}>
+                      <defs><linearGradient id="mc" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={BLUE} stopOpacity={0.3} /><stop offset="100%" stopColor={BLUE} stopOpacity={0} /></linearGradient></defs>
+                      <XAxis dataKey="day" {...axis} tickFormatter={(v) => `${v}d`} minTickGap={30} />
+                      <YAxis {...axis} width={48} domain={["auto", "auto"]} tickFormatter={(v) => `₩${compactKRW(v)}`} />
+                      <Tooltip {...tip} formatter={(v: unknown, n) => [typeof v === "number" ? `₩${formatNumber(Math.round(v))}` : "-", n === "p50" ? "중앙값" : n === "p95" ? "95%" : "5%"]} labelFormatter={(l) => `${l}일 후`} />
+                      <Area dataKey="p50" stroke={BLUE} strokeWidth={2} fill="url(#mc)" />
+                      <Line dataKey="p95" stroke={UP} strokeWidth={1} dot={false} strokeDasharray="3 3" />
+                      <Line dataKey="p5" stroke={DOWN} strokeWidth={1} dot={false} strokeDasharray="3 3" />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                  <p className="text-[11px] text-[var(--text-mute)] mt-2 flex items-center gap-1.5">
+                    <ShieldAlert className="w-3 h-3" />30일 내 손실 확률 <span className={`font-semibold ${mc.probLoss > 0.5 ? "text-rose-400" : "text-emerald-400"}`}>{(mc.probLoss * 100).toFixed(1)}%</span> · 부트스트랩+정규분포 혼합 샘플링
+                  </p>
+                </div>
+              ) : (
+                <div className="h-[200px] flex items-center justify-center text-[var(--text-mute)] text-xs animate-pulse">{loadingAnalytics ? "시뮬레이션 준비 중…" : "데이터 없음"}</div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* 하단: 관심종목 + 실시간 피드 */}
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          {/* 관심종목 */}
+          <div className="panel overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-[var(--border)]">
+              <div className="flex items-center gap-2"><PieIcon className="w-4 h-4 text-violet-300" /><h3 className="text-[11px] font-semibold tracking-wider uppercase text-white">관심 종목</h3></div>
+              <Link href="/market" className="text-[10px] text-violet-300 hover:text-violet-200">시장 →</Link>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[480px]">
                 <tbody>
-                  {holdings.map((h) => {
-                    const isUS = h.currency === "USD";
-                    const fmtNative = (v: number) => isUS ? `$${formatNumber(v, 2)}` : `${formatNumber(v, 0)}원`;
+                  {prices.length === 0 ? (
+                    <tr><td className="px-4 py-8 text-center text-[var(--text-mute)] text-xs">시세 로딩…</td></tr>
+                  ) : prices.map((p) => {
+                    const isUS = !/^\d{6}$/.test(p.symbol);
+                    const up = (p.changeRate ?? 0) >= 0;
                     return (
-                      <tr key={h.symbol} className="border-b border-[var(--border)] hover:bg-white/[0.03] transition-colors">
-                        <td className="px-4 py-3">
-                          <p className="text-slate-100 font-semibold">{h.symbolName}</p>
-                          <p className="text-xs text-[var(--text-mute)] font-mono">{h.symbol}</p>
-                        </td>
-                        <td className="px-4 py-3 tabular-nums text-slate-200">{formatNumber(h.quantity, 0)}</td>
-                        <td className="px-4 py-3 tabular-nums text-[var(--text-dim)]">{fmtNative(h.averagePrice)}</td>
-                        <td className="px-4 py-3 tabular-nums text-slate-200 font-medium">{fmtNative(h.lastPrice)}</td>
-                        <td className="px-4 py-3 tabular-nums text-slate-200">
-                          <p className="font-medium">{formatNumber(Math.round(h.marketValueKRW), 0)}원</p>
-                          {isUS && <p className="text-xs text-[var(--text-mute)]">{fmtNative(h.marketValueNative)}</p>}
-                        </td>
-                        <td className={`px-4 py-3 tabular-nums font-semibold ${h.profitLossRate >= 0 ? "text-rose-400" : "text-blue-400"}`}>
-                          <p>{h.profitLossRate >= 0 ? "+" : ""}{fmtNative(h.profitLossNative)}</p>
-                          {isUS && <p className="text-xs opacity-70">{h.profitLossRate >= 0 ? "+" : ""}{formatNumber(Math.round(h.profitLossKRW), 0)}원</p>}
-                        </td>
-                        <td className={`px-4 py-3 tabular-nums font-semibold ${h.profitLossRate >= 0 ? "text-rose-400" : "text-blue-400"}`}>
-                          {h.profitLossRate >= 0 ? "+" : ""}{h.profitLossRate.toFixed(2)}%
+                      <tr key={p.symbol} className="border-t border-[var(--border)] hover:bg-white/[0.02]">
+                        <td className="px-4 py-2.5"><Link href={`/market?symbol=${p.symbol}`}><p className="text-white text-xs font-medium">{p.symbolName ?? p.symbol}</p><p className="text-[10px] text-[var(--text-mute)] font-mono">{p.symbol}</p></Link></td>
+                        <td className="px-4 py-2.5 tabular-nums text-white text-xs text-right">{isUS ? `$${formatNumber(p.currentPrice, 2)}` : `₩${formatNumber(p.currentPrice, 0)}`}</td>
+                        <td className={`px-4 py-2.5 tabular-nums text-xs text-right font-semibold ${up ? "text-emerald-400" : "text-rose-400"}`}>
+                          <span className="inline-flex items-center gap-1 justify-end">{up ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}{up ? "+" : ""}{(p.changeRate ?? 0).toFixed(2)}%</span>
                         </td>
                       </tr>
                     );
@@ -297,8 +384,30 @@ export default function DashboardPage() {
                 </tbody>
               </table>
             </div>
-          )}
-        </section>
+          </div>
+
+          {/* 실시간 시세 피드 */}
+          <div className="panel overflow-hidden">
+            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[var(--border)]">
+              <Radio className="w-4 h-4 text-emerald-400 animate-pulse" />
+              <h3 className="text-[11px] font-semibold tracking-wider uppercase text-white">실시간 시세 변동</h3>
+              <span className="text-[10px] text-[var(--text-mute)]">3초 간격</span>
+            </div>
+            <div className="max-h-[280px] overflow-y-auto">
+              {feed.length === 0 ? (
+                <div className="px-4 py-8 text-center text-[var(--text-mute)] text-xs">시세 변동을 기다리는 중…</div>
+              ) : feed.map((f) => (
+                <div key={f.id} className="flex items-center gap-3 px-4 py-2 border-t border-[var(--border)] text-xs">
+                  <span className="text-[10px] text-emerald-400 w-10 shrink-0">{f.time}</span>
+                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${f.dir > 0 ? "bg-emerald-400" : f.dir < 0 ? "bg-rose-400" : "bg-slate-500"}`} />
+                  <span className="text-white font-medium flex-1 truncate">{f.name} <span className="text-[var(--text-mute)] font-mono">{f.symbol}</span></span>
+                  <span className="tabular-nums text-[var(--text-dim)]">{f.isUS ? `$${formatNumber(f.price, 2)}` : `₩${formatNumber(f.price, 0)}`}</span>
+                  <span className={`tabular-nums w-20 text-right ${f.dir > 0 ? "text-emerald-400" : f.dir < 0 ? "text-rose-400" : "text-[var(--text-mute)]"}`}>{f.change >= 0 ? "+" : ""}{f.isUS ? f.change.toFixed(2) : formatNumber(Math.round(f.change))}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
