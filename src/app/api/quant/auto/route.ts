@@ -4,6 +4,7 @@ import { autoQuant } from "@/lib/quant/autoquant";
 import { runBacktest } from "@/lib/quant/backtest";
 import { analyzeStrategy } from "@/lib/quant/insights";
 import { tossFeeProfile } from "@/lib/quant/fees";
+import { cscvPBO, deflatedSharpe, sharpePerPeriod, skewness, kurtosis } from "@/lib/quant/validation";
 import { tossGet } from "@/lib/toss-api";
 import { PERIODS_PER_YEAR } from "@/lib/quant/types";
 import type { BacktestConfig } from "@/lib/quant/types";
@@ -59,6 +60,23 @@ export async function POST(req: NextRequest) {
     const result = runBacktest(bars, auto.ensembleSignals, cfg, auto.trainEndIndex);
     const analysis = analyzeStrategy(bars, auto.ensembleSignals, result.trades, { isUS, exchangeRate, budgetKRW });
 
+    // 과적합 진단 (CSCV PBO + DSR)
+    let pbo: number | null = null;
+    let dsr: number | null = null;
+    try {
+      const cr = auto.candidateReturns;
+      const minLen = Math.min(...cr.map((c) => c.length));
+      if (minLen > 16 && cr.length >= 2) {
+        const matrix: number[][] = [];
+        for (let t = 0; t < minLen; t++) matrix.push(cr.map((col) => col[col.length - minLen + t]));
+        pbo = cscvPBO(matrix, 8).pbo;
+        let bi = 0;
+        for (let i = 1; i < auto.candidates.length; i++) if (auto.candidates[i].oosSharpe > auto.candidates[bi].oosSharpe) bi = i;
+        const best = cr[0] ?? [];
+        dsr = deflatedSharpe(cr.map((c) => sharpePerPeriod(c)), best.length, skewness(best), kurtosis(best)).dsr;
+      }
+    } catch { /* 진단 실패 무시 */ }
+
     return NextResponse.json({
       symbol,
       isUS,
@@ -74,6 +92,8 @@ export async function POST(req: NextRequest) {
         agreement: auto.agreement,
         selectedCount: auto.selectedCount,
         lowConfidence: auto.lowConfidence,
+        pbo,
+        dsr,
       },
       result,
       analysis,

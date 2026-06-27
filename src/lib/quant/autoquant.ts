@@ -46,6 +46,7 @@ export interface AutoQuantOutput {
   trainEndIndex: number;
   trainEndTime: string;
   candidates: AutoCandidateScore[];
+  candidateReturns: number[][]; // 후보별 OOS 봉수익률 (PBO/DSR 계산용)
   ensembleMembers: string[];
   ensembleSignals: Position[];
   agreement: number; // 현재 시점 롱 동의 비율
@@ -67,12 +68,17 @@ export function autoQuant(bars: Bar[], cfg: Partial<BacktestConfig>): AutoQuantO
 
   const allSignals: Position[][] = [];
   const scores: AutoCandidateScore[] = [];
+  const candidateReturns: number[][] = [];
 
   for (const c of CANDIDATES) {
     const signals = candidateSignals(bars, c, trainRatio);
     allSignals.push(signals);
     // 검증구간(아웃오브샘플)에서만 평가
     const res = runBacktest(bars, signals, cfg, trainEndIndex);
+    const eq = res.equityCurve.map((p) => p.equity);
+    const rets: number[] = [];
+    for (let t = 1; t < eq.length; t++) rets.push(eq[t - 1] === 0 ? 0 : eq[t] / eq[t - 1] - 1);
+    candidateReturns.push(rets);
     scores.push({
       id: c.id,
       kind: c.kind,
@@ -120,6 +126,7 @@ export function autoQuant(bars: Bar[], cfg: Partial<BacktestConfig>): AutoQuantO
     trainEndIndex,
     trainEndTime: bars[trainEndIndex]?.time ?? "",
     candidates: scores.sort((a, b) => b.oosSharpe - a.oosSharpe),
+    candidateReturns,
     ensembleMembers: chosen.map((c) => CANDIDATES[c.i].id),
     ensembleSignals,
     agreement,
