@@ -91,6 +91,56 @@ export async function POST(req: NextRequest) {
       returnHist = counts.map((count, i) => ({ ret: Number(((lo + (i + 0.5) * width) * 100).toFixed(2)), count }));
     }
 
+    // 벤치마크 대비 CAPM (KOSPI200 = KODEX 200 ETF 069500)
+    let benchmark: {
+      beta: number; alpha: number; correlation: number; r2: number; trackingError: number; totalReturn: number;
+      series: { date: string; value: number }[];
+    } | null = null;
+    try {
+      const bb = await fetchCandlesServer("069500", "1d", 400);
+      if (bb.length >= 20) {
+        // 벤치마크 타임라인 기준 forward-fill (history의 US-only 거래일도 직전 종가 유지)
+        const bMap = new Map(bb.map((b) => [b.time.slice(0, 10), b.close]));
+        const bDates = bb.map((b) => b.time.slice(0, 10)).sort();
+        let ptr = 0;
+        let lastB: number | null = null;
+        const bSeries: number[] = [];
+        let ok = true;
+        for (const p of history) {
+          while (ptr < bDates.length && bDates[ptr] <= p.date) { lastB = bMap.get(bDates[ptr]) as number; ptr++; }
+          if (lastB == null) { ok = false; break; }
+          bSeries.push(lastB);
+        }
+        if (ok && bSeries.length === values.length && bSeries[0] > 0) {
+          const pr = rets;
+          const br = dailyReturns(bSeries);
+          const mean = (a: number[]) => a.reduce((x, y) => x + y, 0) / a.length;
+          const mp = mean(pr), mb = mean(br);
+          let covPB = 0, varB = 0, varP = 0, teSum = 0;
+          for (let i = 0; i < pr.length; i++) {
+            covPB += (pr[i] - mp) * (br[i] - mb);
+            varB += (br[i] - mb) ** 2;
+            varP += (pr[i] - mp) ** 2;
+            teSum += (pr[i] - br[i]) ** 2;
+          }
+          covPB /= pr.length; varB /= pr.length; varP /= pr.length;
+          const beta = varB > 0 ? covPB / varB : 0;
+          const stdP = Math.sqrt(varP), stdB = Math.sqrt(varB);
+          const corr = stdP > 0 && stdB > 0 ? covPB / (stdP * stdB) : 0;
+          const scale = values[0] / bSeries[0];
+          benchmark = {
+            beta,
+            alpha: (mp - beta * mb) * 252,
+            correlation: corr,
+            r2: corr * corr,
+            trackingError: Math.sqrt(teSum / pr.length) * Math.sqrt(252),
+            totalReturn: bSeries[bSeries.length - 1] / bSeries[0] - 1,
+            series: history.map((p, i) => ({ date: p.date, value: bSeries[i] * scale })),
+          };
+        }
+      }
+    } catch { /* 벤치마크 실패는 무시 */ }
+
     // 현재 자산배분
     const currentValue = values[values.length - 1];
     const allocation = series
@@ -119,6 +169,7 @@ export async function POST(req: NextRequest) {
       allocation,
       mpt,
       returnHist,
+      benchmark,
     });
   } catch (e: unknown) {
     if (axios.isAxiosError(e)) {

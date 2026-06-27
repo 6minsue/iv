@@ -6,7 +6,7 @@ import { useAppStore } from "@/store/useAppStore";
 import { extractArray } from "@/lib/parse";
 import { formatNumber, compactKRW } from "@/lib/utils";
 import {
-  ResponsiveContainer, AreaChart, Area, ComposedChart, Line, Bar, PieChart, Pie, Cell,
+  ResponsiveContainer, Area, ComposedChart, Line, Bar, PieChart, Pie, Cell,
   ScatterChart, Scatter, ZAxis, XAxis, YAxis, Tooltip,
 } from "recharts";
 import {
@@ -48,6 +48,7 @@ interface Analytics {
   allocation: { symbol: string; value: number; weight: number; currency: string }[];
   mpt: MPT | null;
   returnHist: { ret: number; count: number }[];
+  benchmark: { beta: number; alpha: number; correlation: number; r2: number; trackingError: number; totalReturn: number; series: { date: string; value: number }[] } | null;
 }
 interface FeedItem { id: number; time: string; symbol: string; name: string; price: number; change: number; dir: 1 | -1 | 0; isUS: boolean; }
 interface AutoAI {
@@ -193,10 +194,12 @@ export default function DashboardPage() {
   const m = analytics?.metrics ?? null;
   const mc = analytics?.monteCarlo ?? null;
 
+  const bench = analytics?.benchmark ?? null;
+  const benchMap = new Map((bench?.series ?? []).map((s) => [s.date, s.value]));
   const histData = (() => {
     const h = analytics?.history ?? [];
     const n = range === "1M" ? 22 : range === "3M" ? 66 : h.length;
-    return h.slice(-n).map((p) => ({ date: p.date.slice(5), value: p.value }));
+    return h.slice(-n).map((p) => ({ date: p.date.slice(5), value: p.value, bench: benchMap.get(p.date) }));
   })();
   const mcData = mc?.band.map((b) => ({ day: b.day, p5: b.p5, p50: b.p50, p95: b.p95 })) ?? [];
   const mptD = analytics?.mpt ?? null;
@@ -367,15 +370,28 @@ export default function DashboardPage() {
               </div>
               <div className="p-4">
                 {histData.length > 1 ? (
+                  <>
                   <ResponsiveContainer width="100%" height={230}>
-                    <AreaChart data={histData}>
+                    <ComposedChart data={histData}>
                       <defs><linearGradient id="bal" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={ACCENT} stopOpacity={0.4} /><stop offset="100%" stopColor={ACCENT} stopOpacity={0} /></linearGradient></defs>
                       <XAxis dataKey="date" {...axis} minTickGap={50} />
                       <YAxis {...axis} width={52} domain={["auto", "auto"]} tickFormatter={(v) => `₩${compactKRW(v)}`} />
-                      <Tooltip {...tip} formatter={(v: unknown) => [typeof v === "number" ? `₩${formatNumber(Math.round(v))}` : "-", "평가액"]} />
-                      <Area dataKey="value" stroke={ACCENT} strokeWidth={2} fill="url(#bal)" />
-                    </AreaChart>
+                      <Tooltip {...tip} formatter={(v: unknown, n) => [typeof v === "number" ? `₩${formatNumber(Math.round(v))}` : "-", n === "bench" ? "KOSPI200(정규화)" : "평가액"]} />
+                      <Area dataKey="value" stroke={ACCENT} strokeWidth={2} fill="url(#bal)" name="value" />
+                      {bench && <Line dataKey="bench" stroke="#94a3b8" strokeWidth={1.5} dot={false} strokeDasharray="4 3" name="bench" />}
+                    </ComposedChart>
                   </ResponsiveContainer>
+                  {bench && (
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 px-1 text-[10px]">
+                      <span className="text-[var(--text-mute)]">vs KOSPI200 · 베타 <span className="text-white tabular-nums">{bench.beta.toFixed(2)}</span></span>
+                      <span className="text-[var(--text-mute)]">알파(연) <span className={`tabular-nums ${bench.alpha >= 0 ? "text-emerald-400" : "text-rose-400"}`}>{bench.alpha >= 0 ? "+" : ""}{(bench.alpha * 100).toFixed(1)}%</span></span>
+                      <span className="text-[var(--text-mute)]">상관 <span className="text-white tabular-nums">{bench.correlation.toFixed(2)}</span></span>
+                      <span className="text-[var(--text-mute)]">R² <span className="text-white tabular-nums">{(bench.r2 * 100).toFixed(0)}%</span></span>
+                      <span className="text-[var(--text-mute)]">추적오차 <span className="text-white tabular-nums">{(bench.trackingError * 100).toFixed(1)}%</span></span>
+                      <span className="text-slate-400">┄ 벤치마크</span>
+                    </div>
+                  )}
+                  </>
                 ) : (
                   <div className="h-[230px] flex items-center justify-center text-[var(--text-mute)] text-xs animate-pulse">{loadingAnalytics ? "가격 히스토리 수집 중…" : "데이터 없음"}</div>
                 )}
