@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  Briefcase, Home, TrendingUp, Settings, FlaskConical, Gauge, Atom, Receipt,
+  Briefcase, Home, TrendingUp, Settings, Gauge, Atom, Receipt,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -11,7 +11,6 @@ const nav = [
   { href: "/", icon: Home, label: "대시보드" },
   { href: "/market", icon: TrendingUp, label: "시장" },
   { href: "/signals", icon: Gauge, label: "시그널·분석" },
-  { href: "/strategy", icon: FlaskConical, label: "전략 연구소" },
   { href: "/lab", icon: Atom, label: "리서치 랩" },
   { href: "/portfolio", icon: Briefcase, label: "포트폴리오" },
   { href: "/transactions", icon: Receipt, label: "거래내역" },

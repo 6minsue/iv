@@ -49,6 +49,30 @@ function formatTime(timeStr: string, interval: ChartInterval): string {
   }
 }
 
+interface TooltipRow { open: number; high: number; low: number; close: number; volume: number }
+// 렌더 외부 정의(안티패턴 방지). isUS는 Tooltip content prop으로 주입.
+function CandleTooltip({ active, payload, label, isUS }: {
+  active?: boolean; payload?: Array<{ payload: TooltipRow }>; label?: string; isUS?: boolean;
+}) {
+  if (!active || !payload?.length) return null;
+  const d = payload[0].payload;
+  const fmt = (v: number) => (isUS ? `$${v.toFixed(2)}` : v.toLocaleString("ko-KR"));
+  const chg = d.close - d.open;
+  const chgPct = d.open > 0 ? (chg / d.open) * 100 : 0;
+  return (
+    <div className="rounded-lg p-3 text-xs min-w-[150px]" style={{ background: "#131826", border: "1px solid rgba(255,255,255,0.1)" }}>
+      <p className="text-[var(--text-dim)] mb-2 font-medium">{label}</p>
+      <div className="space-y-1">
+        {([["시가", d.open, "text-slate-200"], ["고가", d.high, "text-rose-400"], ["저가", d.low, "text-blue-400"], ["종가", d.close, "text-white font-semibold"]] as const).map(([lbl, val, cls]) => (
+          <div key={lbl} className="flex justify-between gap-4"><span className="text-[var(--text-mute)]">{lbl}</span><span className={`font-mono ${cls}`}>{fmt(Number(val))}</span></div>
+        ))}
+        <div className="flex justify-between gap-4"><span className="text-[var(--text-mute)]">변동</span><span className={`font-mono ${chg >= 0 ? "text-rose-400" : "text-blue-400"}`}>{chg >= 0 ? "+" : ""}{fmt(chg)} ({chgPct >= 0 ? "+" : ""}{chgPct.toFixed(2)}%)</span></div>
+        <div className="border-t border-[var(--border)] mt-1 pt-1 flex justify-between gap-4"><span className="text-[var(--text-mute)]">거래량</span><span className="font-mono text-[var(--text-dim)]">{d.volume.toLocaleString()}</span></div>
+      </div>
+    </div>
+  );
+}
+
 export default function CandleChart({ symbol, interval = "1d", count }: Props) {
   const [candles, setCandles] = useState<Candle[]>([]);
   const [loading, setLoading] = useState(true);
@@ -56,6 +80,7 @@ export default function CandleChart({ symbol, interval = "1d", count }: Props) {
   const effectiveCount = count ?? DEFAULT_COUNTS[interval];
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     setCandles([]);
     fetch(`/api/candles?symbol=${symbol}&interval=${interval}&count=${effectiveCount}`)
@@ -103,49 +128,6 @@ export default function CandleChart({ symbol, interval = "1d", count }: Props) {
 
   const fmtPrice = (v: number) => isUS ? `$${v.toFixed(2)}` : v.toLocaleString("ko-KR");
 
-  const TooltipContent = ({
-    active,
-    payload,
-    label,
-  }: {
-    active?: boolean;
-    payload?: Array<{ value: number; payload: (typeof chartData)[0] }>;
-    label?: string;
-  }) => {
-    if (!active || !payload?.length) return null;
-    const d = payload[0].payload;
-    const chg = d.close - d.open;
-    const chgPct = d.open > 0 ? (chg / d.open) * 100 : 0;
-    return (
-      <div className="bg-white border border-slate-200 rounded-lg shadow-lg p-3 text-xs min-w-[150px]">
-        <p className="text-slate-500 mb-2 font-medium">{label}</p>
-        <div className="space-y-1">
-          {[
-            ["시가", d.open, "text-slate-700"],
-            ["고가", d.high, "text-red-500"],
-            ["저가", d.low, "text-blue-500"],
-            ["종가", d.close, "text-slate-900 font-semibold"],
-          ].map(([lbl, val, cls]) => (
-            <div key={String(lbl)} className="flex justify-between gap-4">
-              <span className="text-slate-400">{lbl}</span>
-              <span className={`font-mono ${cls}`}>{fmtPrice(Number(val))}</span>
-            </div>
-          ))}
-          <div className="flex justify-between gap-4">
-            <span className="text-slate-400">변동</span>
-            <span className={`font-mono ${chg >= 0 ? "text-red-500" : "text-blue-500"}`}>
-              {chg >= 0 ? "+" : ""}{fmtPrice(chg)} ({chgPct >= 0 ? "+" : ""}{chgPct.toFixed(2)}%)
-            </span>
-          </div>
-          <div className="border-t border-slate-100 mt-1 pt-1 flex justify-between gap-4">
-            <span className="text-slate-400">거래량</span>
-            <span className="font-mono text-slate-600">{d.volume.toLocaleString()}</span>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   return (
     <div>
       <div className="flex items-center justify-between mb-2 text-xs text-slate-400">
@@ -177,7 +159,7 @@ export default function CandleChart({ symbol, interval = "1d", count }: Props) {
             tickFormatter={fmtPrice}
             width={isUS ? 62 : 72}
           />
-          <Tooltip content={<TooltipContent />} />
+          <Tooltip content={<CandleTooltip isUS={isUS} />} />
           <ReferenceLine
             y={last.close}
             stroke="#6366f1"

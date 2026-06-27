@@ -39,6 +39,8 @@ export default function Header({ title }: { title: string }) {
         if (list.length > 0 && !selectedAccount) setSelectedAccount(list[0]);
       })
       .catch(() => {});
+    // 계좌 1회 로드 (마운트 시) — 의도적으로 deps 비움
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (

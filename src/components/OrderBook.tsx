@@ -42,6 +42,7 @@ export default function OrderBook({ symbol }: { symbol: string }) {
 
   useEffect(() => {
     if (pollingRef.current) window.clearInterval(pollingRef.current);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setData(null);
     fetchBook(true);
     pollingRef.current = window.setInterval(() => fetchBook(false), 5000);
