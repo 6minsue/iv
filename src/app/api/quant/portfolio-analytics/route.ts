@@ -79,6 +79,18 @@ export async function POST(req: NextRequest) {
     const metrics = computeRisk(values, 252);
     const mc = monteCarlo(values, 30, 2500);
 
+    // 일별수익률 분포 히스토그램 (VaR 시각화용)
+    const rets = dailyReturns(values);
+    let returnHist: { ret: number; count: number }[] = [];
+    if (rets.length >= 10) {
+      const lo = Math.min(...rets), hi = Math.max(...rets);
+      const bins = 21;
+      const width = (hi - lo) / bins || 1;
+      const counts = Array(bins).fill(0);
+      for (const r of rets) counts[Math.min(bins - 1, Math.max(0, Math.floor((r - lo) / width)))]++;
+      returnHist = counts.map((count, i) => ({ ret: Number(((lo + (i + 0.5) * width) * 100).toFixed(2)), count }));
+    }
+
     // 현재 자산배분
     const currentValue = values[values.length - 1];
     const allocation = series
@@ -106,6 +118,7 @@ export async function POST(req: NextRequest) {
       monteCarlo: mc,
       allocation,
       mpt,
+      returnHist,
     });
   } catch (e: unknown) {
     if (axios.isAxiosError(e)) {

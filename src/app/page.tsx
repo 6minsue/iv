@@ -6,7 +6,7 @@ import { useAppStore } from "@/store/useAppStore";
 import { extractArray } from "@/lib/parse";
 import { formatNumber, compactKRW } from "@/lib/utils";
 import {
-  ResponsiveContainer, AreaChart, Area, ComposedChart, Line, PieChart, Pie, Cell,
+  ResponsiveContainer, AreaChart, Area, ComposedChart, Line, Bar, PieChart, Pie, Cell,
   ScatterChart, Scatter, ZAxis, XAxis, YAxis, Tooltip,
 } from "recharts";
 import {
@@ -47,6 +47,7 @@ interface Analytics {
   metrics: Metrics | null; monteCarlo: MC | null;
   allocation: { symbol: string; value: number; weight: number; currency: string }[];
   mpt: MPT | null;
+  returnHist: { ret: number; count: number }[];
 }
 interface FeedItem { id: number; time: string; symbol: string; name: string; price: number; change: number; dir: 1 | -1 | 0; isUS: boolean; }
 interface AutoAI {
@@ -199,6 +200,7 @@ export default function DashboardPage() {
   })();
   const mcData = mc?.band.map((b) => ({ day: b.day, p5: b.p5, p50: b.p50, p95: b.p95 })) ?? [];
   const mptD = analytics?.mpt ?? null;
+  const histR = analytics?.returnHist ?? [];
   const frontierData = mptD?.frontier.map((f) => ({ x: f.vol * 100, y: f.ret * 100, sharpe: f.sharpe })) ?? [];
   const upDownCls = (v: number) => (v >= 0 ? "text-emerald-400" : "text-rose-400");
 
@@ -306,6 +308,7 @@ export default function DashboardPage() {
               {loadingAnalytics && !m ? (
                 <div className="p-8 text-center text-[var(--text-mute)] text-xs animate-pulse">리스크 분석 계산 중… (백엔드에서 가격 히스토리 수집)</div>
               ) : m ? (
+                <>
                 <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-y divide-[var(--border)]">
                   {[
                     { l: "VaR 95% (1일)", v: `${(m.var95Hist * 100).toFixed(2)}%`, s: `₩${compactKRW(m.var95Hist * (analytics?.currentValue ?? 0))}`, tone: "down" },
@@ -324,6 +327,23 @@ export default function DashboardPage() {
                     </div>
                   ))}
                 </div>
+                {histR.length > 0 && (
+                  <div className="px-4 py-3 border-t border-[var(--border)]">
+                    <p className="text-[10px] text-[var(--text-mute)] mb-1">일별 수익률 분포 · VaR 손실 구간 (역사적 시뮬레이션)</p>
+                    <ResponsiveContainer width="100%" height={120}>
+                      <ComposedChart data={histR}>
+                        <XAxis dataKey="ret" {...axis} tickFormatter={(v) => `${v}%`} minTickGap={24} />
+                        <YAxis {...axis} width={26} />
+                        <Tooltip {...tip} formatter={(v: unknown) => [typeof v === "number" ? `${v}일` : "-", "관측"]} labelFormatter={(l) => `${l}% 일수익`} />
+                        <Bar dataKey="count">
+                          {histR.map((d, i) => <Cell key={i} fill={d.ret <= -m.var99Hist * 100 ? "#9f1239" : d.ret <= -m.var95Hist * 100 ? "#f43f5e" : d.ret < 0 ? "rgba(244,63,94,0.45)" : "rgba(52,211,153,0.55)"} />)}
+                        </Bar>
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                    <p className="text-[10px] text-[var(--text-mute)] mt-1">진빨강 = VaR99 이탈 · 빨강 = VaR95 이탈 손실 · VaR95 {(m.var95Hist * 100).toFixed(2)}% · 99% {(m.var99Hist * 100).toFixed(2)}%</p>
+                  </div>
+                )}
+                </>
               ) : (
                 <div className="p-8 text-center text-[var(--text-mute)] text-xs">보유 종목이 있으면 VaR·Sharpe 등 리스크 지표를 계산합니다</div>
               )}
